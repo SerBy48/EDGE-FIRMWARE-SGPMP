@@ -49,4 +49,4 @@ distinto).
 - El contrato de payload MQTT en sí (vive en `BROKER-MQTT-SGPMP`; este repo
   lo consume, no lo redefine).
 - Reenvío automático de comandos perdidos por desconexión — no implementado
-  del lado del servidor, ver nota en `PLAN_DESARROLLO.md` Fase 4.
+  del lado del servidor, ver `PLAN_DESARROLLO.md` sección 2.2.

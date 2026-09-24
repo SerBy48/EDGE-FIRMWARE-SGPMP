@@ -31,4 +31,6 @@ esp32/         Firmware de los nodos sensores (PlatformIO/C++)
 
 ## Estado
 
-Fase 0 (protocolo LoRa) en borrador — sin código de producción todavía.
+Fase 0 (protocolo LoRa) en borrador. Siguiente paso: hito M1 (enlace MQTT
+persistente de la Raspberry), que no depende de LoRa — sin código de
+producción todavía.
