@@ -1,0 +1,7 @@
+{
+  "name": "sgpmp_protocol",
+  "version": "1.0.0",
+  "description": "Codec de tramas LoRa v1 SGPMP (docs/PROTOCOLO_LORA.md)",
+  "frameworks": "*",
+  "platforms": "*"
+}

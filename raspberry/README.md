@@ -5,8 +5,16 @@ sube por MQTT al broker (`BROKER-MQTT-SGPMP`), siguiendo el contrato de
 `INTEGRACION_DISPOSITIVOS_RF23.md`. Mantiene una conexión MQTT persistente y
 responde los comandos RF-23 por sí solo: no requiere SSH para operar.
 
-**Estado: hito M1 implementado** (`../docs/PLAN_DESARROLLO.md`). Hasta la
-Fase 2, las lecturas vienen de `FakeLoraSource` (datos sintéticos).
+**Estado: M1–M3 y Fase 2 implementados** (`../docs/PLAN_DESARROLLO.md`).
+`EDGE_SOURCE=lora` usa el SX1276 real; `EDGE_SOURCE=fake` usa datos
+sintéticos (desarrollo y pruebas contra el broker sin radio).
+
+Instalación en la Raspberry (una vez; después, solo para actualizar):
+
+```bash
+sudo ./scripts/install.sh --env /ruta/edge-agent.env [--ca /ruta/ca.pem]
+journalctl -u edge-agent -f
+```
 
 ## Qué hace
 
@@ -28,6 +36,9 @@ python -m venv .venv
 .venv/Scripts/python -m pytest
 .venv/Scripts/ruff check .
 
+# Aceptación contra dev (además de EDGE_*: EDGE_IT_API_URL, EDGE_IT_API_TOKEN)
+.venv/Scripts/python -m pytest -m integration -v
+
 # Contra un broker (variables en edge-agent.env.example)
 set -a; . ./mi-ambiente.env; set +a
 .venv/Scripts/python -m edge_agent
@@ -44,13 +55,19 @@ edge_agent/
   buffer.py           # outbox SQLite (WAL) + estado_local_buffer
   sources.py          # DataSource + FakeLoraSource
   system.py           # reloj_sincronizado (timedatectl)
+  systemd.py          # sd_notify: READY y watchdog
   config.py           # Settings desde variables de entorno
-  main.py             # arranque del proceso
-  lora_receiver.py    # Fase 2 — bloqueado por Fase 0
+  main.py             # arranque del proceso (--check-config)
+  lora/
+    protocol.py       # tramas v1 (docs/PROTOCOLO_LORA.md)
+    sx1276.py         # driver SPI del SX1276
+    gateway.py        # DataSource LoRa: uplink, dedupe, downlink de config
+    monitor.py        # monitor de enlace para pruebas de campo
 systemd/
-  edge-agent.service  # M2 — Restart=always + WatchdogSec
+  edge-agent.service  # Type=notify, Restart=always, WatchdogSec
+  journald-sgpmp-edge.conf
 scripts/
-  install.sh          # M2 — provisión única (/etc/sgpmp/edge-agent.env)
+  install.sh          # provisión/actualización idempotente
 tests/
-  integration/        # M3 — aceptación contra dev vía POST /v1/commands
+  integration/        # M3 — pytest -m integration (contra dev)
 ```

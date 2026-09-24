@@ -20,6 +20,18 @@ reiniciarla o revisar su estado). Eso se cubre con los hitos M1–M3, que **no
 dependen del protocolo LoRa** y pueden avanzar mientras la Fase 0 sigue en
 revisión.
 
+## Estado (2026-09-24)
+
+| Hito / fase | Estado | Verificado | Falta |
+|---|---|---|---|
+| M1 — enlace MQTT persistente | Implementado | Tests unitarios y smoke contra un broker local | Sesión persistente contra el Mosquitto de dev (M3) |
+| M2 — operación sin SSH | Implementado | Tests (sd_notify), sintaxis del instalador | Instalación real en la Pi 3 |
+| M3 — aceptación automática | Implementado | — | Ejecutar `pytest -m integration` contra dev |
+| Fase 0 — protocolo LoRa v1 | Propuesta implementada | Vectores idénticos en Python y C++ | Revisión del equipo de hardware; frecuencia/potencia con la ANE |
+| Fase 1 — firmware ESP32 | Implementado | Compila (`pio run`), tests del codec | Hardware real; drivers de sensores reales |
+| Fase 2 — gateway LoRa en la RPi | Implementado | Tests contra un SX1276 simulado a nivel de registros | Hardware real |
+| Fase 3 — pruebas de campo | Protocolo escrito (`PRUEBAS_CAMPO.md`) + monitor de enlace | — | Ejecutarlo |
+
 ## 0. Decisión de arquitectura ya tomada
 
 **Opción A confirmada:** la Raspberry lleva su propio módulo LoRa SX1276, y
@@ -50,8 +62,11 @@ seriales)?**
   `sgpmp/+/command`, así que una sola conexión MQTT puede atender 1 o N
   seriales. `mqtt_client.py` se diseña desde el inicio con una lista de
   seriales.
-- **Sí bloquea** el protocolo LoRa (Fase 0), el downlink y la semántica del
-  heartbeat por serial (ver sección 2.3).
+- **Tampoco bloquea el protocolo LoRa:** la v1 mapea `node_id → serial` por
+  configuración en la Raspberry (`EDGE_LORA_NODES`, `PROTOCOLO_LORA.md` §3).
+  Cada nodo con su serial = modelo por ESP32; todos al mismo = modelo por
+  sitio. La decisión sigue siendo del equipo, pero se aplica sin cambiar
+  código.
 
 ## 1. Hitos del enlace persistente (sin dependencia de LoRa)
 
@@ -250,15 +265,17 @@ Esto refuerza evaluar primero el serial por sitio (`PROTOCOLO_LORA.md` §6).
 
 ## 3. Fases LoRa (dependen de la Fase 0)
 
-### Fase 0 — Protocolo LoRa (bloqueante, sin código todavía)
+### Fase 0 — Protocolo LoRa (propuesta v1 implementada, pendiente de revisión)
 - Definir banda/frecuencia según regulación de radiofrecuencia en el país de
   despliegue (asumido Colombia → banda ISM 915 MHz; **confirmar con
   regulación local antes de fijar la frecuencia en firmware**, no asumir EU868).
 - Definir formato de trama (header + payload + CRC), direccionamiento por
   nodo ESP32, esquema de reintento/ACK (LoRa no es fiable como IP).
 - Definir si hay downlink (Raspberry → ESP32), considerando la sección 2.3.
-- Entregable: `docs/PROTOCOLO_LORA.md` firmado/revisado por el equipo de
-  hardware antes de pasar a Fase 1.
+- Entregable: `docs/PROTOCOLO_LORA.md` v1, codificado en
+  `raspberry/edge_agent/lora/protocol.py` y `esp32/lib/sgpmp_protocol/` con
+  vectores compartidos. Falta la revisión del equipo de hardware antes de
+  campo.
 
 ### Fase 1 — Firmware ESP32 (nodo sensor)
 - Lectura de sensores según `frecuencia_captura` vigente (default hasta que
@@ -268,18 +285,23 @@ Esto refuerza evaluar primero el serial por sitio (`PROTOCOLO_LORA.md` §6).
   frecuencia de captura.
 - Modo bajo consumo entre capturas (estos nodos son a batería).
 - Entregable: `esp32/` — proyecto PlatformIO, sin lógica de MQTT.
+  **Implementado** (compila; sensores simulados hasta definir el hardware).
 
 ### Fase 2 — Driver LoRa + listener en la Raspberry
-- Recepción continua de tramas LoRa (SPI, `pySX127x` o equivalente),
-  validación de CRC, decodificado.
-- Reemplaza a `FakeLoraSource` detrás de la misma interfaz que usa M1.
-- Entregable: `raspberry/edge_agent/lora_receiver.py`.
+- Recepción continua de tramas LoRa (driver SX1276 propio por SPI, sin
+  `pySX127x`), validación de CRC, decodificado y downlink de config.
+- Reemplaza a `FakeLoraSource` detrás de la misma interfaz que usa M1
+  (`EDGE_SOURCE=lora`).
+- Entregable: `raspberry/edge_agent/lora/` (`sx1276.py`, `gateway.py`,
+  `monitor.py`). **Implementado.**
 
 ### Fase 3 — Pruebas de campo con hardware real
 - Repetir un set de pruebas equivalente a P1-P7 pero para el enlace LoRa:
   pérdida de trama, fuera de rango, colisión con otro nodo, batería baja.
 - Prueba de extremo a extremo real: cambio de config desde la web →
   Raspberry → (ESP32 por LoRa, si aplica) → ACK MQTT real.
+- Entregable: protocolo de pruebas en `docs/PRUEBAS_CAMPO.md` y monitor de
+  enlace (`python -m edge_agent.lora.monitor`); falta ejecutarlo.
 
 ## 4. Pendientes a decidir
 
@@ -307,8 +329,9 @@ Lado servidor / equipo SGPMP (especificación):
    compartida.
 
 Lado edge / hardware:
-8. Frecuencia LoRa exacta y regulación aplicable.
-9. Serial MQTT: ¿por Raspberry o por ESP32?
+8. Frecuencia LoRa exacta, potencia y regulación aplicable (ANE).
+9. Serial MQTT: ¿por Raspberry o por ESP32? Ya no bloquea: se configura
+   en `EDGE_LORA_NODES`.
 10. Conectividad IP de la Raspberry en campo (WiFi / Ethernet / 4G) —
    dimensiona el buffer.
 11. Mecanismo de actualización remota del edge_agent (release firmado +
