@@ -79,8 +79,10 @@ seriales)?**
   Informar `reloj_sincronizado` en el heartbeat.
 - Fuente de datos intercambiable: `FakeLoraSource` (datos sintéticos) hasta
   que exista `lora_receiver.py` (Fase 2).
-- Entregables: `raspberry/edge_agent/mqtt_client.py`, `config_store.py`,
-  `buffer.py`, `main.py`.
+- Entregables: `raspberry/edge_agent/` (`agent.py`, `mqtt_client.py`,
+  `commands.py`, `config_store.py`, `buffer.py`, `sources.py`) y
+  `raspberry/edge-agent.env.example`. **Implementado** — falta verificar la
+  sesión persistente contra el Mosquitto de dev (M3).
 
 ### M2 — Operación sin SSH
 - `edge-agent.service` (systemd): `Restart=always`, `WatchdogSec=` con
