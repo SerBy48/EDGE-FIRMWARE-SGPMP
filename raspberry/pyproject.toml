@@ -14,6 +14,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Radio SX1276 en la Raspberry (EDGE_SOURCE=lora). RPi.GPIO: backend de
+# gpiozero para el pin de reset en Pi 3/4.
+lora = [
+    "spidev>=3.6; sys_platform == 'linux'",
+    "gpiozero>=2.0; sys_platform == 'linux'",
+    "RPi.GPIO>=0.7.1; sys_platform == 'linux'",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.5",

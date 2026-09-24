@@ -19,7 +19,7 @@ from edge_agent.buffer import Buffer
 from edge_agent.config import ConfigError, Settings
 from edge_agent.config_store import ConfigStore, DeviceConfig
 from edge_agent.mqtt_client import Event, MqttLink
-from edge_agent.sources import FakeLoraSource
+from edge_agent.sources import DataSource, FakeLoraSource
 from edge_agent.systemd import SystemdNotifier
 
 logger = logging.getLogger("edge_agent")
@@ -35,9 +35,19 @@ class Runtime:
     buffer: Buffer
     store: ConfigStore
     agent: Agent
+    source: DataSource
+
+    def start(self) -> None:
+        start = getattr(self.source, "start", None)
+        if start is not None:
+            start()  # gateway LoRa: inicializa la radio y su hilo
+        self.link.start()
 
     def close(self) -> None:
         self.link.stop()
+        stop = getattr(self.source, "stop", None)
+        if stop is not None:
+            stop()
         self.buffer.close()
 
 
@@ -52,8 +62,36 @@ def build(settings: Settings) -> Runtime:
     buffer = Buffer(settings.buffer_path, settings.buffer_max_rows)
     events: queue.Queue[Event] = queue.Queue()
     link = MqttLink(settings, events)
-    agent = Agent(settings, link, store, buffer, FakeLoraSource(settings.fake_variables))
-    return Runtime(settings, events, link, buffer, store, agent)
+    source = _build_source(settings)
+    agent = Agent(settings, link, store, buffer, source)
+    return Runtime(settings, events, link, buffer, store, agent, source)
+
+
+def _build_source(settings: Settings) -> DataSource:
+    if settings.lora is None:
+        return FakeLoraSource(settings.fake_variables)
+    # Import diferido: spidev/gpiozero solo existen en la Raspberry.
+    from edge_agent.lora.gateway import LoraGateway, LoraVariable
+    from edge_agent.lora.sx1276 import SX1276, RadioConfig, gpio_reset, open_spi
+
+    lora = settings.lora
+    reset = gpio_reset(lora.reset_gpio) if lora.reset_gpio is not None else None
+    radio = SX1276(open_spi(lora.spi_bus, lora.spi_device), reset=reset)
+    return LoraGateway(
+        radio,
+        RadioConfig(
+            freq_hz=lora.freq_hz,
+            tx_power_dbm=lora.tx_power_dbm,
+            sf=lora.sf,
+            bw_hz=lora.bw_hz,
+            cr=lora.cr,
+            sync_word=lora.sync_word,
+        ),
+        lora.net_id,
+        lora.nodes,
+        {code: LoraVariable(*var) for code, var in lora.variables.items()},
+        downlink_delay_s=lora.downlink_delay_ms / 1000,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -82,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
         signal.signal(sig, lambda *_: stop.set())
 
     logger.info("edge_agent %s arrancando: %s", settings.firmware_version, settings)
-    runtime.link.start()
+    runtime.start()
     notifier.ready()
     try:
         runtime.agent.run(runtime.events, stop, on_loop=notifier.watchdog)

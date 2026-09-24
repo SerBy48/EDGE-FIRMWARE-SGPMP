@@ -36,7 +36,7 @@ def rt(tmp_path_factory):
         state_path=workdir / "config.json",
     )
     runtime = build(settings)
-    runtime.link.start()
+    runtime.start()
     yield runtime
     # Deja el dispositivo con la config por defecto del .env.
     try:

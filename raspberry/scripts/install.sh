@@ -71,7 +71,7 @@ rsync -a --delete \
 log "Entorno virtual en $PREFIX/venv"
 [[ -x "$PREFIX/venv/bin/python" ]] || python3 -m venv "$PREFIX/venv"
 "$PREFIX/venv/bin/pip" install -q --upgrade pip
-"$PREFIX/venv/bin/pip" install -q "$PREFIX/app"
+"$PREFIX/venv/bin/pip" install -q "$PREFIX/app[lora]"
 
 log "Configuración en $CONF_DIR"
 install -d -m 0755 "$CONF_DIR"

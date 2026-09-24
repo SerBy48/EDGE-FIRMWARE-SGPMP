@@ -1,18 +1,21 @@
 """Fuentes de lecturas de sensores.
 
 `DataSource` es la interfaz que usa el agente. `FakeLoraSource` genera datos
-sintéticos para M1/M3; `lora_receiver.py` (Fase 2) la implementará con el
-SX1276 real sin cambiar nada del resto del agente.
+sintéticos (M1/M3, desarrollo); `lora.gateway.LoraGateway` la implementa con
+el SX1276 real (Fase 2). El agente no distingue entre ambas.
 """
 
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from edge_agent.config import FakeVariable
+
+if TYPE_CHECKING:
+    from edge_agent.config_store import DeviceConfig
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,7 @@ class Reading:
     nivel_bateria_pct: float | None = None
     calidad_senal_rssi: float | None = None
     calidad_senal_snr: float | None = None
+    metadatos: dict[str, Any] = field(default_factory=dict)
 
 
 class DataSource(Protocol):
@@ -33,12 +37,20 @@ class DataSource(Protocol):
         """Lecturas nuevas de `serial` desde la última llamada."""
         ...
 
-    def is_alive(self, serial: str, now: datetime) -> bool:
-        """Si se escuchó al nodo recientemente.
+    def is_alive(self, serial: str, now: datetime, max_silence_s: float) -> bool:
+        """Si se escuchó al nodo en los últimos `max_silence_s` segundos.
 
         Con serial por ESP32, la Raspberry no debe publicar heartbeat de un
         nodo que no escucha: si no, un ESP32 caído seguiría `ACTIVO` (plan, 2.1).
         """
+        ...
+
+    def status(self, serial: str) -> dict[str, Any]:
+        """Campos extra del heartbeat MQTT (batería, RSSI, SNR) si se conocen."""
+        ...
+
+    def apply_config(self, serial: str, config: DeviceConfig) -> None:
+        """Config vigente de `serial`, para propagarla a los nodos (downlink)."""
         ...
 
 
@@ -59,5 +71,11 @@ class FakeLoraSource:
             for var in self._variables
         ]
 
-    def is_alive(self, serial: str, now: datetime) -> bool:
+    def is_alive(self, serial: str, now: datetime, max_silence_s: float) -> bool:
         return True
+
+    def status(self, serial: str) -> dict[str, Any]:
+        return {}
+
+    def apply_config(self, serial: str, config: DeviceConfig) -> None:
+        pass

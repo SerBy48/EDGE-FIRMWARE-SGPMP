@@ -146,3 +146,57 @@ def test_config_sobrevive_reinicio_del_agente(tmp_path):
     h2.agent.handle_event(Connected(session_present=False), h2.now)
     assert [a["comando_id"] for a in h2.link.on("status")] == ["c-9"]
     h2.buffer.close()
+
+
+class StubSource:
+    def __init__(self):
+        self.alive = True
+        self.applied = []
+        self.silence = None
+
+    def read(self, serial, now):
+        return []
+
+    def is_alive(self, serial, now, max_silence_s):
+        self.silence = max_silence_s
+        return self.alive
+
+    def status(self, serial):
+        return {"nivel_bateria_pct": 55.0, "calidad_senal_rssi": -90.0, "calidad_senal_snr": None}
+
+    def apply_config(self, serial, config):
+        self.applied.append((serial, config.frecuencia_captura_min))
+
+
+def test_heartbeat_usa_estado_de_la_fuente_y_se_omite_si_el_nodo_calla(tmp_path):
+    h = Harness(tmp_path)
+    source = StubSource()
+    h.agent._source = source
+
+    h.advance(0)
+    (hb,) = h.link.on("heartbeat")
+    assert hb["nivel_bateria_pct"] == 55.0
+    assert hb["calidad_senal_rssi"] == -90.0
+    assert "calidad_senal_snr" not in hb
+    assert source.silence == 2 * 15 * 60  # dos ciclos de intervalo_transmision
+
+    source.alive = False
+    h.link.take()
+    h.advance(300)
+    assert h.link.on("heartbeat") == []
+    h.buffer.close()
+
+
+def test_config_se_propaga_a_la_fuente_al_arrancar_y_con_cada_comando(tmp_path):
+    from edge_agent.agent import Agent
+
+    h = Harness(tmp_path)
+    source = StubSource()
+    agent = Agent(h.settings, h.link, h.store, h.buffer, source, clock=lambda: h.now)
+    assert source.applied == [(SERIAL, 10)]
+
+    agent.handle_event(
+        Message(COMMAND_TOPIC, b'{"frecuencia_captura":5,"intervalo_transmision":30}'), h.now
+    )
+    assert source.applied[-1] == (SERIAL, 5)
+    h.buffer.close()

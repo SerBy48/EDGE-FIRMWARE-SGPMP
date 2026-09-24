@@ -84,6 +84,10 @@ class Agent:
         self._schedules = {
             serial: self._initial_schedule(serial, now) for serial in settings.serials
         }
+        # Tras un reinicio, la config persistida vuelve a ser la deseada para
+        # los nodos: convergen solos en su próxima ventana de downlink.
+        for serial in settings.serials:
+            source.apply_config(serial, store.get(serial))
 
     def heartbeat_interval_s(self, serial: str) -> float:
         cfg = self._store.get(serial)
@@ -166,6 +170,7 @@ class Agent:
                 ack = error_ack(ack.get("comando_id"), "no se pudo persistir la configuración")
             else:
                 self._reschedule(serial, now)
+                self._source.apply_config(serial, result.config)
         detalle = ack.get("motivo") or ("aplicado" if result.changed else "sin cambios")
         logger.info("Comando %s → %s (%s)", serial, ack["resultado"], detalle)
 
@@ -252,7 +257,7 @@ class Agent:
     def _send_heartbeat(self, serial: str, now: float) -> None:
         sched = self._schedules[serial]
         sched.next_heartbeat = now + self.heartbeat_interval_s(serial)
-        if not self._source.is_alive(serial, _utc(now)):
+        if not self._source.is_alive(serial, _utc(now), self._max_silence_s(serial)):
             logger.info("Sin heartbeat para %s: no se escucha al nodo", serial)
             return
 
@@ -267,9 +272,19 @@ class Agent:
             "reloj_sincronizado": self._reloj_sincronizado(),
             "fecha_registro": _iso(now),
         }
+        payload.update({k: v for k, v in self._source.status(serial).items() if v is not None})
         topic = self._settings.topic(serial, self._settings.topic_heartbeat)
         if self._link.publish(topic, json.dumps(payload).encode("utf-8")) is not None:
             self._last_reported[serial] = estado
+
+    def _max_silence_s(self, serial: str) -> float:
+        """Silencio tolerado de los nodos de `serial` antes de dejar de reportarlo.
+
+        Un nodo transmite cada `intervalo_transmision` (y nunca más seguido que
+        `frecuencia_captura`): se toleran dos ciclos perdidos.
+        """
+        cfg = self._store.get(serial)
+        return 2 * max(cfg.frecuencia_captura_min, cfg.intervalo_transmision_min) * 60
 
     def _report_sync_finished(self, now: float) -> None:
         """BUFFER_ACTIVO → ACTIVO en el servidor apenas se vacía el buffer.
@@ -299,7 +314,7 @@ def _telemetry_payload(reading: Reading) -> dict[str, Any]:
         "valor_crudo": reading.valor_crudo,
         "unidad": reading.unidad,
         "timestamp_captura": reading.timestamp_captura.isoformat(),
-        "metadatos": {"event_id": str(uuid.uuid4())},
+        "metadatos": {**reading.metadatos, "event_id": str(uuid.uuid4())},
     }
     optional = {
         "sensor": reading.sensor,

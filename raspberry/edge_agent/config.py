@@ -33,6 +33,25 @@ class FakeVariable:
 
 
 @dataclass(frozen=True)
+class LoraSettings:
+    """Radio y mapeo del gateway LoRa (docs/PROTOCOLO_LORA.md §2–3)."""
+
+    freq_hz: int
+    tx_power_dbm: int
+    sf: int
+    bw_hz: int
+    cr: int
+    sync_word: int
+    net_id: int
+    nodes: dict[int, str]  # node_id -> serial MQTT
+    variables: dict[int, tuple[str, str]]  # code -> (nombre, unidad)
+    spi_bus: int
+    spi_device: int
+    reset_gpio: int | None
+    downlink_delay_ms: int
+
+
+@dataclass(frozen=True)
 class Settings:
     mqtt_host: str
     mqtt_port: int
@@ -55,6 +74,7 @@ class Settings:
     state_path: Path
     source: str
     fake_variables: tuple[FakeVariable, ...]
+    lora: LoraSettings | None = None
     firmware_version: str = __version__
 
     def topic(self, serial: str, suffix: str) -> str:
@@ -77,9 +97,9 @@ class Settings:
             raise ConfigError(f"EDGE_MQTT_CA_CERT no existe: {ca_cert}")
 
         source = env.get("EDGE_SOURCE", "fake")
-        if source != "fake":
-            # `lora` llega con la Fase 2 (lora_receiver.py).
-            raise ConfigError(f"EDGE_SOURCE no soportado todavía: {source!r}")
+        if source not in ("fake", "lora"):
+            raise ConfigError(f"EDGE_SOURCE debe ser 'fake' o 'lora', llegó {source!r}")
+        lora = parse_lora_settings(env, serials) if source == "lora" else None
 
         return cls(
             mqtt_host=_require(env, "EDGE_MQTT_HOST"),
@@ -103,6 +123,7 @@ class Settings:
             state_path=Path(env.get("EDGE_STATE_PATH", "/var/lib/sgpmp-edge/config.json")),
             source=source,
             fake_variables=_parse_fake_variables(env.get("EDGE_FAKE_VARIABLES", "")),
+            lora=lora,
         )
 
 
@@ -152,3 +173,71 @@ def _parse_fake_variables(raw: str) -> tuple[FakeVariable, ...]:
         except ValueError as exc:
             raise ConfigError(f"EDGE_FAKE_VARIABLES: rango no numérico en {item!r}") from exc
     return tuple(variables)
+
+
+def parse_lora_settings(
+    env: Mapping[str, str], serials: tuple[str, ...] | None = None
+) -> LoraSettings:
+    """`serials=None` omite validar contra EDGE_SERIALS (monitor de enlace)."""
+    # Frecuencia y potencia: sin default, dependen de la regulación (ANE).
+    nodes = _parse_mapping(_require(env, "EDGE_LORA_NODES"), "EDGE_LORA_NODES", ",")
+    parsed_nodes: dict[int, str] = {}
+    for key, serial in nodes.items():
+        node_id = _parse_int_value(key, "EDGE_LORA_NODES", 1, 0xFFFE)
+        if serials is not None and serial not in serials:
+            raise ConfigError(f"EDGE_LORA_NODES: el serial {serial!r} no está en EDGE_SERIALS")
+        parsed_nodes[node_id] = serial
+
+    variables: dict[int, tuple[str, str]] = {}
+    raw_vars = _parse_mapping(_require(env, "EDGE_LORA_VARIABLES"), "EDGE_LORA_VARIABLES", ";")
+    for key, value in raw_vars.items():
+        code = _parse_int_value(key, "EDGE_LORA_VARIABLES", 0, 0xFF)
+        nombre, sep, unidad = value.partition(":")
+        if not sep or not nombre:
+            raise ConfigError(f"EDGE_LORA_VARIABLES: se espera code=nombre:unidad en {value!r}")
+        variables[code] = (nombre, unidad)
+
+    reset = env.get("EDGE_LORA_RESET_GPIO", "").strip()
+    return LoraSettings(
+        freq_hz=_int(env, "EDGE_LORA_FREQ_HZ"),
+        tx_power_dbm=_int(env, "EDGE_LORA_TX_POWER_DBM"),
+        sf=_int(env, "EDGE_LORA_SF", 9),
+        bw_hz=_int(env, "EDGE_LORA_BW_HZ", 125_000),
+        cr=_int(env, "EDGE_LORA_CR", 5),
+        sync_word=_int_in(env, "EDGE_LORA_SYNC_WORD", "0x12", 0, 0xFF),
+        net_id=_parse_int_value(_require(env, "EDGE_LORA_NET_ID"), "EDGE_LORA_NET_ID", 0, 0xFF),
+        nodes=parsed_nodes,
+        variables=variables,
+        spi_bus=_int_in(env, "EDGE_LORA_SPI_BUS", "0", 0, 9),
+        spi_device=_int_in(env, "EDGE_LORA_SPI_DEVICE", "0", 0, 9),
+        reset_gpio=_parse_int_value(reset, "EDGE_LORA_RESET_GPIO", 0, 53) if reset else None,
+        downlink_delay_ms=_int_in(env, "EDGE_LORA_DOWNLINK_DELAY_MS", "50", 0, 1000),
+    )
+
+
+def _parse_mapping(raw: str, name: str, separator: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for item in filter(None, (part.strip() for part in raw.split(separator))):
+        key, sep, value = item.partition("=")
+        if not sep or not key.strip() or not value.strip():
+            raise ConfigError(f"{name} mal formado en {item!r} (se espera clave=valor)")
+        if key.strip() in result:
+            raise ConfigError(f"{name}: clave repetida {key.strip()!r}")
+        result[key.strip()] = value.strip()
+    if not result:
+        raise ConfigError(f"{name} está vacío")
+    return result
+
+
+def _int_in(env: Mapping[str, str], name: str, default: str, minimo: int, maximo: int) -> int:
+    return _parse_int_value(env.get(name, "").strip() or default, name, minimo, maximo)
+
+
+def _parse_int_value(raw: str, name: str, minimo: int, maximo: int) -> int:
+    try:
+        value = int(raw.strip(), 0)  # acepta 0x12
+    except ValueError as exc:
+        raise ConfigError(f"{name}: {raw!r} no es un entero") from exc
+    if not minimo <= value <= maximo:
+        raise ConfigError(f"{name}: {value} fuera de rango [{minimo}, {maximo}]")
+    return value
