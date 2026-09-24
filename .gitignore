@@ -1,5 +1,6 @@
 # Credenciales — nunca versionar (mismo criterio que BROKER-MQTT-SGPMP)
 .env
+*.env
 *.secrets
 raspberry/edge_agent/config.local.*
 
@@ -7,6 +8,8 @@ raspberry/edge_agent/config.local.*
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
+.ruff_cache/
 venv/
 
 # PlatformIO

@@ -26,17 +26,21 @@ mundo MQTT/IP. Ningún ESP32 se conecta nunca directo al broker.
 ## Diagrama de capas del edge-agent (Raspberry)
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     edge_agent (proceso)                 │
-│                                                           │
-│  lora_receiver.py   →   procesamiento/agregado   →  mqtt_client.py │
-│  (SPI, SX1276,          (buffer, validación,          (paho-mqtt,  │
-│   decodifica tramas)     aplica config vigente)         topics RF-23)│
-│                                                           │
-│  config_store.py  (persistencia local: frecuencia_captura,          │
-│                     intervalo_transmision — sobrevive reinicio)      │
-└─────────────────────────────────────────────────────────┘
+                 hilo LoRa                         hilo principal (agent.py)                 hilo paho
+┌──────────────────────────────┐   lecturas   ┌──────────────────────────────┐  eventos  ┌──────────────────┐
+│ lora/gateway.py              │ ───────────▶ │ agenda captura/tx/heartbeat  │ ◀──────── │ mqtt_client.py   │
+│  sx1276.py (SPI)             │              │ commands.py → config_store   │           │ sesión           │
+│  protocol.py (tramas v1)     │ ◀─────────── │ buffer.py (outbox SQLite)    │ ────────▶ │ persistente,     │
+│  dedupe/pérdidas por seq     │  config      │ heartbeat (estado buffer)    │  publish  │ QoS 1, TLS opc.  │
+│  downlink CONFIG en ventana  │  deseada     │                              │           │                  │
+└──────────────────────────────┘              └──────────────────────────────┘           └──────────────────┘
+   (o FakeLoraSource: datos sintéticos, EDGE_SOURCE=fake)      │ sd_notify (watchdog de systemd)
 ```
+
+- Solo el hilo principal toca SQLite y la config; los otros hilos entregan
+  eventos y lecturas por colas o con un lock.
+- Todo lo que debe llegar al broker (telemetría, ACK) pasa primero por el
+  buffer y se borra con el PUBACK: sobrevive cortes de red y reinicios.
 
 Ningún módulo de este proceso toca directamente la base de datos ni el
 backend HTTPS — esa separación de capas ya vive en `BROKER-MQTT-SGPMP` y no
@@ -49,4 +53,4 @@ distinto).
 - El contrato de payload MQTT en sí (vive en `BROKER-MQTT-SGPMP`; este repo
   lo consume, no lo redefine).
 - Reenvío automático de comandos perdidos por desconexión — no implementado
-  del lado del servidor, ver nota en `PLAN_DESARROLLO.md` Fase 4.
+  del lado del servidor, ver `PLAN_DESARROLLO.md` sección 2.2.

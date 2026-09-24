@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  raspberry:
+    name: edge_agent (Raspberry)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: raspberry
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Raspberry Pi OS bookworm trae Python 3.11.
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+      - name: Sintaxis de scripts
+        run: bash -n scripts/install.sh
+
+  esp32:
+    name: Firmware ESP32
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: esp32
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('esp32/platformio.ini') }}
+      - run: pip install platformio
+      - name: Tests del protocolo (vectores compartidos con Python)
+        run: pio test -e native
+      - name: Compilación
+        run: pio run -e esp32dev

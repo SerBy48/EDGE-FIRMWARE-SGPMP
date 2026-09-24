@@ -11,10 +11,11 @@ de campo.
 ## Por dónde empezar
 
 1. Leer `docs/ARQUITECTURA.md` — qué es cada componente y cómo se hablan.
-2. Leer `docs/PROTOCOLO_LORA.md` — formato de trama LoRa (borrador, en
-   revisión con el equipo de hardware).
-3. Leer `docs/PLAN_DESARROLLO.md` — fases de desarrollo y qué falta decidir
-   antes de escribir código más allá del protocolo.
+2. Leer `docs/PROTOCOLO_LORA.md` — protocolo LoRa v1 (implementado,
+   pendiente de revisión con el equipo de hardware).
+3. Leer `docs/PLAN_DESARROLLO.md` — fases, estado y decisiones pendientes.
+4. Leer `docs/INSTALACION_RASPBERRY.md` — instalación paso a paso en la Pi.
+5. Leer `docs/PRUEBAS_CAMPO.md` — pruebas con hardware real (Fase 3).
 
 El contrato MQTT (topics, payload, credenciales) que el `edge_agent` de la
 Raspberry debe respetar está documentado en el repo `BROKER-MQTT-SGPMP`,
@@ -31,4 +32,7 @@ esp32/         Firmware de los nodos sensores (PlatformIO/C++)
 
 ## Estado
 
-Fase 0 (protocolo LoRa) en borrador — sin código de producción todavía.
+Implementados M1–M3 (enlace MQTT persistente, operación sin SSH, aceptación
+automática), el protocolo LoRa v1 y las fases 1–2 (firmware ESP32 y gateway
+LoRa de la Raspberry). Falta validarlo contra dev y con hardware real: ver la
+tabla de estado en `docs/PLAN_DESARROLLO.md` y `docs/PRUEBAS_CAMPO.md`.
