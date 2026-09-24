@@ -93,8 +93,16 @@ class Agent:
             base = self._settings.heartbeat_interval_s
         return min(base, cfg.frecuencia_captura_min * 60 / 2)
 
-    def run(self, events: queue.Queue[Event], stop: threading.Event) -> None:
+    def run(
+        self,
+        events: queue.Queue[Event],
+        stop: threading.Event,
+        on_loop: Callable[[], None] | None = None,
+    ) -> None:
+        """Loop principal. `on_loop` se llama en cada vuelta (watchdog de systemd)."""
         while not stop.is_set():
+            if on_loop is not None:
+                on_loop()
             try:
                 event = events.get(timeout=0.5)
             except queue.Empty:

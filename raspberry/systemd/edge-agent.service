@@ -1,0 +1,44 @@
+# SGPMP edge_agent — gateway LoRa <-> MQTT de la Raspberry.
+# Instalado por scripts/install.sh; no editar en el equipo (se sobreescribe).
+# Configuración del sitio: /etc/sgpmp/edge-agent.env
+
+[Unit]
+Description=SGPMP edge_agent (gateway LoRa <-> MQTT)
+Wants=network-online.target time-sync.target
+After=network-online.target time-sync.target
+# Reintentar para siempre: en campo no hay nadie para hacer "systemctl start".
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=sgpmp-edge
+Group=sgpmp-edge
+# spi/gpio: acceso al SX1276 (Fase 2). Si el grupo no existe se ignora.
+SupplementaryGroups=spi gpio
+EnvironmentFile=/etc/sgpmp/edge-agent.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/sgpmp-edge/venv/bin/python -m edge_agent
+Restart=always
+RestartSec=5
+# El loop principal notifica cada <= 30 s; si se traba, systemd lo reinicia.
+WatchdogSec=60
+TimeoutStopSec=20
+
+# /var/lib/sgpmp-edge: buffer SQLite y config local (EDGE_BUFFER_PATH/EDGE_STATE_PATH).
+StateDirectory=sgpmp-edge
+StateDirectoryMode=0750
+
+# Endurecimiento: el servicio solo escribe en su StateDirectory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

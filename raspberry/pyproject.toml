@@ -35,3 +35,6 @@ select = ["E", "F", "I", "W", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Los de integración van contra un ambiente real: pytest -m integration
+addopts = "-m 'not integration'"
+markers = ["integration: requiere broker/API reales (variables EDGE_IT_*)"]
