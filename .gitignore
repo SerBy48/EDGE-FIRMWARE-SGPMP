@@ -1,0 +1,18 @@
+# Credenciales — nunca versionar (mismo criterio que BROKER-MQTT-SGPMP)
+.env
+*.secrets
+raspberry/edge_agent/config.local.*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# PlatformIO
+esp32/.pio/
+esp32/.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
