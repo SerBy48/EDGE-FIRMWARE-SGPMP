@@ -14,7 +14,8 @@ de campo.
 2. Leer `docs/PROTOCOLO_LORA.md` — protocolo LoRa v1 (implementado,
    pendiente de revisión con el equipo de hardware).
 3. Leer `docs/PLAN_DESARROLLO.md` — fases, estado y decisiones pendientes.
-4. Leer `docs/PRUEBAS_CAMPO.md` — pruebas con hardware real (Fase 3).
+4. Leer `docs/INSTALACION_RASPBERRY.md` — instalación paso a paso en la Pi.
+5. Leer `docs/PRUEBAS_CAMPO.md` — pruebas con hardware real (Fase 3).
 
 El contrato MQTT (topics, payload, credenciales) que el `edge_agent` de la
 Raspberry debe respetar está documentado en el repo `BROKER-MQTT-SGPMP`,
