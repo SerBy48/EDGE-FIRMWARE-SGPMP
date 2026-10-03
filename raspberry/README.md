@@ -24,7 +24,9 @@ journalctl -u edge-agent -f
   con `estado_local_buffer`, `datos_pendientes_buffer`, `version_firmware` y
   `reloj_sincronizado`.
 - Comando `sgpmp/<serial>/command` → validación → persistencia → ACK en
-  `sgpmp/<serial>/status`, idempotente por `comando_id`/`config_version`.
+  `sgpmp/<serial>/status` con el `id_comando` del broker; idempotente por
+  `id_comando`/`config_version` y, con NTP, rechaza comandos vencidos por
+  `emitido_en` (TC-M09-252).
 - Telemetría y ACKs pasan por un buffer SQLite: nada se pierde sin red ni
   al reiniciar, y lo retenido sale con `origen: BUFFER_LOCAL`.
 

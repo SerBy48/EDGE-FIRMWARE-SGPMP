@@ -23,7 +23,8 @@ se reconecta y se reinicia solo.
 |---|---|
 | Hardware | Raspberry Pi 3 Model B, microSD de 16 GB o más (clase A1), fuente oficial 5 V / 2.5 A |
 | Red | WiFi 2.4 GHz (la Pi 3 no tiene 5 GHz) o cable Ethernet, con salida a internet |
-| Datos del ambiente dev | Host y puerto MQTT (en dev: TCP 1884, sin TLS), contraseña de `sgpmp_devices` (guía privada `GUIA_CONEXION_IOT_DEV.md`) |
+| Datos del ambiente dev | Host y puerto MQTT (en dev: TCP 1884, sin TLS; guía privada `GUIA_CONEXION_IOT_DEV.md`) |
+| Credencial MQTT | La de **esta** Raspberry, generada en la plataforma: Configuración → IoT → "Credencial MQTT de la Raspberry" (requiere permiso de actualizar dispositivos IoT). La contraseña se muestra una sola vez |
 | Serial | Un serial registrado en `modulo9.dispositivos_iot` (ej. el del flujo F1: `TC-M09-G64-1789321890010`) |
 | Solo etapa B | Módulo SX1276/RFM95 **de 915 MHz** con antena, 7 cables dupont hembra-hembra |
 | Solo M3 | URL del API del broker (`https://<host>/v1`) y el token Bearer de servicio |
@@ -125,8 +126,8 @@ Valores para la **etapa A contra dev**:
 ```ini
 EDGE_MQTT_HOST=<host de dev>
 EDGE_MQTT_PORT=1884
-EDGE_MQTT_USERNAME=sgpmp_devices
-EDGE_MQTT_PASSWORD=<contraseña de dev>
+EDGE_MQTT_USERNAME=TC-M09-G64-1789321890010
+EDGE_MQTT_PASSWORD=<contraseña generada en la plataforma>
 EDGE_SERIALS=TC-M09-G64-1789321890010
 EDGE_HEARTBEAT_INTERVAL_S=300
 EDGE_FRECUENCIA_CAPTURA_MIN=10
@@ -137,6 +138,11 @@ EDGE_FAKE_VARIABLES=temperatura_ambiente:C:20:30
 
 Notas:
 
+- Las tres primeras líneas de credencial (`EDGE_MQTT_USERNAME`,
+  `EDGE_MQTT_PASSWORD`, `EDGE_SERIALS`) las muestra la plataforma al generar la
+  credencial, listas para copiar. Si el broker rechaza la conexión con
+  "Not authorized", la credencial fue rotada o revocada: generar una nueva y
+  actualizar este archivo.
 - `EDGE_FAKE_VARIABLES`: el nombre debe existir en
   `modulo9.variables_ambientales`. Si no existe, el broker descarta la
   telemetría, pero heartbeat y comandos funcionan igual. Se puede dejar

@@ -5,8 +5,8 @@ en una cola. Todo el estado (buffer, config) lo maneja el hilo del agente, así
 no hay SQLite compartido entre hilos.
 
 Sesión persistente (plan, M1):
-- `client_id` fijo: la credencial es compartida, dos clientes con el mismo
-  id se desconectan entre sí.
+- `client_id` fijo: dos clientes con el mismo id se desconectan entre sí (con
+  la credencial compartida legacy, cualquiera podía tomar el id de otro).
 - `clean_session=False` + suscripción QoS 1: Mosquitto encola los comandos
   mientras la Raspberry está desconectada.
 - Reconexión automática de paho con backoff exponencial.
