@@ -1,6 +1,12 @@
-"""ACL de la credencial compartida de dispositivos (P3, P4, P6, P7, E1, E2).
+"""ACL de la credencial MQTT de la Raspberry (P3, P4, P6, P7, P8, E1, E2).
 
-Versión automática de las verificaciones de DOC_PRUEBA_ACL_EDGE_DEV.docx.
+Versión automática de las verificaciones de DOC_PRUEBA_ACL_EDGE_DEV.docx,
+actualizada a la credencial por Raspberry (TC-M09-250/251, SEG-BROKER-03 del
+broker): EDGE_MQTT_USERNAME/PASSWORD deben ser los generados en la plataforma
+para el primer serial de EDGE_SERIALS. Con la credencial compartida legacy
+`sgpmp_devices`, P7 y P8 fallan a propósito: es el riesgo que la credencial por
+Raspberry cierra.
+
 Usa MQTT 5 para que las publicaciones no autorizadas devuelvan PUBACK 135.
 P6/E1 requieren EDGE_IT_GATEWAY_USERNAME/PASSWORD; sin ellas se omiten.
 """
@@ -19,7 +25,7 @@ from .helpers import requires_env
 
 pytestmark = [pytest.mark.integration, requires_env]
 
-SERIAL = "TEST-ACL-001"
+SERIAL = os.environ.get("EDGE_SERIALS", "TEST-ACL-001").split(",")[0].strip()
 AJENO = "SERIAL-AJENO-P7"
 QUIET_S = 4
 
@@ -31,6 +37,7 @@ class Probe:
         self.messages: queue.Queue = queue.Queue()
         self.pubacks: queue.Queue = queue.Queue()
         self.connack: queue.Queue = queue.Queue()
+        self.subacks: queue.Queue = queue.Queue()
         self.client = mqtt.Client(
             callback_api_version=CallbackAPIVersion.VERSION2,
             client_id=f"acl-probe-{uuid.uuid4().hex[:8]}",
@@ -44,6 +51,7 @@ class Probe:
         self.client.on_connect = lambda c, u, f, rc, p: self.connack.put(rc)
         self.client.on_message = lambda c, u, m: self.messages.put((m.topic, m.payload))
         self.client.on_publish = lambda c, u, mid, rc, p: self.pubacks.put(rc)
+        self.client.on_subscribe = lambda c, u, mid, rcs, p: self.subacks.put(rcs)
 
     def connect(self):
         host = os.environ["EDGE_MQTT_HOST"]
@@ -51,6 +59,11 @@ class Probe:
         self.client.connect(host, port)
         self.client.loop_start()
         return self.connack.get(timeout=10)
+
+    def subscribe(self, topic: str) -> bool:
+        """True si el broker concedió la suscripción."""
+        self.client.subscribe(topic, qos=1)
+        return not any(rc.is_failure for rc in self.subacks.get(timeout=10))
 
     def publish(self, topic: str, payload: str = '{"acl":1}'):
         self.client.publish(topic, payload, qos=1)
@@ -97,12 +110,25 @@ def test_p4_dispositivo_no_publica_comandos(device):
     assert device.publish(f"sgpmp/{SERIAL}/command").value == 135
 
 
-def test_p7_dispositivo_no_ve_otros_seriales(device):
+def test_p7_dispositivo_no_publica_en_topics_de_otro_serial(device):
+    """TC-M09-250: no puede escribir telemetría ni forjar el ACK de otro serial."""
     for suffix in ("telemetry", "heartbeat", "status"):
-        device.client.subscribe(f"sgpmp/+/{suffix}", qos=1)
+        assert device.publish(f"sgpmp/{AJENO}/{suffix}").value == 135, suffix
+
+
+def test_p7_dispositivo_si_publica_en_sus_topics(device):
     for suffix in ("telemetry", "heartbeat", "status"):
-        assert not device.publish(f"sgpmp/{AJENO}/{suffix}").is_failure
-    assert device.silent()
+        assert not device.publish(f"sgpmp/{SERIAL}/{suffix}").is_failure, suffix
+
+
+@pytest.mark.parametrize("topic", ["#", "sgpmp/#", "sgpmp/+/command", f"sgpmp/{AJENO}/command"])
+def test_p8_suscripcion_ajena_recibe_suback_de_fallo(device, topic):
+    """TC-M09-251: un SUBSCRIBE con comodines o sobre otro serial se rechaza."""
+    assert not device.subscribe(topic)
+
+
+def test_p8_suscripcion_a_su_propio_command(device):
+    assert device.subscribe(f"sgpmp/{SERIAL}/command")
 
 
 def test_p6_gateway_recibe_telemetria(device, gateway):
