@@ -52,28 +52,27 @@ a definir) al broker.
    Broker MQTT (BROKER-MQTT-SGPMP, ya en dev)
 ```
 
-Pendiente de decidir con el equipo: **¿el `serial` MQTT registrado en
-`modulo9.dispositivos_iot` identifica a la Raspberry (un serial agrega todos
-sus ESP32) o a cada ESP32 individualmente (la Raspberry reenvía N
-seriales)?**
+Decidido (RF-21, aprobado por el DBA): la Raspberry es el **Gateway Edge** y
+se registra en `modulo9.dispositivos_iot` con el tipo `GATEWAY_EDGE`; cada
+ESP32 es un dispositivo con su propio serial que apunta a su Edge
+(`id_dispositivo_gateway`, N:1). Desactivar el Edge desactiva sus
+dispositivos en cascada.
 
-- **No bloquea el cliente MQTT (M1).** La ACL de `sgpmp_devices` permite
-  escribir en `sgpmp/+/{telemetry,heartbeat,status}` y leer
-  `sgpmp/+/command`, así que una sola conexión MQTT puede atender 1 o N
-  seriales. `mqtt_client.py` se diseña desde el inicio con una lista de
-  seriales.
-- **Tampoco bloquea el protocolo LoRa:** la v1 mapea `node_id → serial` por
-  configuración en la Raspberry (`EDGE_LORA_NODES`, `PROTOCOLO_LORA.md` §3).
-  Cada nodo con su serial = modelo por ESP32; todos al mismo = modelo por
-  sitio. La decisión sigue siendo del equipo, pero se aplica sin cambiar
-  código.
+- **Cliente MQTT (M1):** una sola conexión por Gateway Edge atiende N
+  seriales. La credencial (TC-M09-250/251) es del Edge y el broker la deriva
+  de la BD: serial del Edge + dispositivos activos asignados a él.
+  `mqtt_client.py` ya trabaja con una lista de seriales.
+- **Protocolo LoRa:** la v1 mapea `node_id → serial` por configuración en la
+  Raspberry (`EDGE_LORA_NODES`, `PROTOCOLO_LORA.md` §3), un nodo por serial de
+  dispositivo.
 
 ## 1. Hitos del enlace persistente (sin dependencia de LoRa)
 
 ### M1 — Cliente MQTT persistente del edge_agent
 - Una conexión MQTT por Raspberry, `client_id` fijo y único
-  (`edge-<serial_raspberry>`). La credencial es compartida por todos los
-  dispositivos: dos clientes con el mismo `client_id` se desconectan entre sí.
+  (`edge-<serial_raspberry>`): dos clientes con el mismo `client_id` se
+  desconectan entre sí. La credencial es la del Gateway Edge (usuario =
+  serial del Edge), generada en la plataforma.
 - Sesión persistente: `clean_session=False` y suscripción a
   `sgpmp/<serial>/command` con QoS 1, para que Mosquitto encole los comandos
   durante cortes cortos. Publicaciones con QoS 1.
@@ -87,8 +86,9 @@ seriales)?**
   telemetría y ACKs no entregados; se reenvía al reconectar con
   `origen: "BUFFER_LOCAL"`. No se depende de la cola en memoria de paho,
   que se pierde al reiniciar.
-- TLS configurable (`ca_cert`, puerto `MQTT_TLS_HOST_PORT`) desde el primer
-  día, aunque `dev` todavía no tenga certificados.
+- TLS configurable (`EDGE_MQTT_CA_CERT`) desde el primer día. En test/prod el
+  broker publica solo TLS en el mismo puerto de siempre (TC-M09-253); `dev`
+  sigue sin certificados.
 - Hora: NTP obligatorio. `timestamp_captura` lo pone la Raspberry (los ESP32
   no tienen reloj). Si el sitio puede arrancar sin red, agregar un RTC.
   Informar `reloj_sincronizado` en el heartbeat.
@@ -224,16 +224,20 @@ solo mira `tipo_mensaje` y `resultado` e ignora campos extra):
 {
   "tipo_mensaje": "ACK_CONFIGURACION",
   "resultado": "OK",
-  "comando_id": "<eco del comando, si viene>",
+  "id_comando": "<eco del comando, si viene>",
   "config_version_aplicada": "<eco del comando, si viene>",
   "event_id": "<uuid generado por el edge>"
 }
 ```
 
 Reglas del lado del firmware:
-- `comando_id`/`config_version_aplicada` se devuelven como eco **solo si el
-  comando los trae**; mientras el broker no los envíe, se omiten.
-- Idempotencia local: `config_store` guarda el último `comando_id` y la
+- `id_comando`/`config_version_aplicada` se devuelven como eco **solo si el
+  comando los trae**. El broker ya manda `id_comando` y `emitido_en`
+  (TC-M09-252) y solo acepta el ACK que devuelve ese id; se lee también
+  `comando_id` por compatibilidad con el diseño M09.
+- Con NTP sincronizado, un comando cuyo `emitido_en` supera
+  `EDGE_COMANDO_ANTIGUEDAD_MAX_S` (120 s) se rechaza con ACK ERROR: es un replay.
+- Idempotencia local: `config_store` guarda el último `id_comando` y la
   `config_version` aplicada. Un duplicado (redelivery QoS 1 o reintento M09)
   se vuelve a confirmar sin reaplicarse. Una versión menor a la vigente se
   descarta y se confirma con la versión vigente.
@@ -325,8 +329,9 @@ Lado servidor / equipo SGPMP (especificación):
    transición asíncrona `NO_CONF → APLICADA` (sección 2.2).
 6. `persistence true` en Mosquitto, para que los comandos encolados
    sobrevivan un reinicio del broker.
-7. Fecha de TLS en `dev`. Requisito para salir a campo con la credencial
-   compartida.
+7. Fecha de TLS en `dev`. La credencial ya es propia de cada Gateway Edge
+   (TC-M09-250/251); falta retirar la compartida `sgpmp_devices` cuando todos
+   migren.
 
 Lado edge / hardware:
 8. Frecuencia LoRa exacta, potencia y regulación aplicable (ANE).

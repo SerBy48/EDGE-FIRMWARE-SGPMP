@@ -74,6 +74,10 @@ class Settings:
     state_path: Path
     source: str
     fake_variables: tuple[FakeVariable, ...]
+    # TC-M09-252: antigüedad máxima de un comando (con reloj sincronizado) antes de
+    # rechazarlo como replay. El broker espera el ACK 30 s; el margen absorbe la
+    # deriva entre relojes.
+    comando_antiguedad_max_s: float = 120.0
     lora: LoraSettings | None = None
     firmware_version: str = __version__
 
@@ -123,6 +127,7 @@ class Settings:
             state_path=Path(env.get("EDGE_STATE_PATH", "/var/lib/sgpmp-edge/config.json")),
             source=source,
             fake_variables=_parse_fake_variables(env.get("EDGE_FAKE_VARIABLES", "")),
+            comando_antiguedad_max_s=_positive_float(env, "EDGE_COMANDO_ANTIGUEDAD_MAX_S", 120.0),
             lora=lora,
         )
 
@@ -149,8 +154,12 @@ def _int(env: Mapping[str, str], name: str, default: int | None = None) -> int:
     return value
 
 
-def _positive_float(env: Mapping[str, str], name: str) -> float:
-    raw = _require(env, name)
+def _positive_float(env: Mapping[str, str], name: str, default: float | None = None) -> float:
+    raw = env.get(name, "").strip()
+    if not raw:
+        if default is None:
+            raise ConfigError(f"Falta la variable de entorno obligatoria {name}")
+        return default
     try:
         value = float(raw)
     except ValueError as exc:

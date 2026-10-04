@@ -3,6 +3,11 @@
 Contrato: `docs/PLAN_DESARROLLO.md` sección 2.2. El ACK base
 (`tipo_mensaje`/`resultado`) es el que el broker ya valida; los campos extra
 son compatibles hacia atrás porque `ingest_status()` los ignora.
+
+Anti-replay (TC-M09-252, `INTEGRACION_DISPOSITIVOS_RF23.md` del broker): el
+comando trae `id_comando` y `emitido_en`. El ACK devuelve `id_comando` (sin él
+el broker no puede asociar la confirmación), un `id_comando` ya procesado no se
+re-aplica, y con el reloj sincronizado se rechaza un comando demasiado viejo.
 """
 
 from __future__ import annotations
@@ -10,6 +15,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Any
 
 from edge_agent.config_store import DeviceConfig
@@ -24,7 +30,15 @@ class CommandResult:
     changed: bool
 
 
-def handle_command(raw: bytes, current: DeviceConfig) -> CommandResult:
+def handle_command(
+    raw: bytes,
+    current: DeviceConfig,
+    *,
+    ahora: float | None = None,
+    antiguedad_max_s: float | None = None,
+) -> CommandResult:
+    """`ahora` (epoch) solo si el reloj está sincronizado: sin reloj fiable no se
+    puede juzgar la antigüedad y basta con no re-aplicar un id ya procesado."""
     try:
         data = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -32,12 +46,18 @@ def handle_command(raw: bytes, current: DeviceConfig) -> CommandResult:
     if not isinstance(data, dict):
         return _error(current, None, "payload debe ser un objeto JSON")
 
-    comando_id = data.get("comando_id")
+    # `id_comando` es el campo del broker; `comando_id`, el del diseño M09.
+    comando_id = data.get("id_comando", data.get("comando_id"))
     config_version = data.get("config_version")
 
     # Reentrega QoS 1 o reintento de M09: se re-confirma sin reaplicar.
     if comando_id is not None and comando_id == current.comando_id:
         return CommandResult(_ack("OK", comando_id, current.config_version), current, False)
+
+    if ahora is not None and antiguedad_max_s is not None:
+        emitido = _epoch(data.get("emitido_en"))
+        if emitido is not None and ahora - emitido > antiguedad_max_s:
+            return _error(current, comando_id, "comando vencido: emitido_en demasiado antiguo")
 
     # Llegó un comando más viejo que el vigente (cola persistente + reintentos).
     if _is_older(config_version, current.config_version):
@@ -76,7 +96,7 @@ def _ack(
 ) -> dict[str, Any]:
     ack: dict[str, Any] = {"tipo_mensaje": TIPO_ACK, "resultado": resultado}
     if comando_id is not None:
-        ack["comando_id"] = comando_id
+        ack["id_comando"] = comando_id
         # Solo se reporta versión cuando el servidor usa el contrato extendido.
         if config_version is not None:
             ack["config_version_aplicada"] = config_version
@@ -89,6 +109,17 @@ def _ack(
 
 def _error(current: DeviceConfig, comando_id: Any, motivo: str) -> CommandResult:
     return CommandResult(_ack("ERROR", comando_id, None, motivo), current, False)
+
+
+def _epoch(value: Any) -> float | None:
+    # ISO 8601 con zona (el broker manda UTC "+00:00"); sin zona no se puede comparar.
+    if not isinstance(value, str):
+        return None
+    try:
+        fecha = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return fecha.timestamp() if fecha.tzinfo is not None else None
 
 
 def _is_older(new: Any, current: Any) -> bool:

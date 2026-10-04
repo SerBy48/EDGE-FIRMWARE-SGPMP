@@ -160,14 +160,19 @@ class Agent:
             logger.warning("Comando en topic ajeno a este edge: %s", topic)
             return
 
-        result = handle_command(payload, self._store.get(serial))
+        result = handle_command(
+            payload,
+            self._store.get(serial),
+            ahora=now if self._reloj_sincronizado() else None,
+            antiguedad_max_s=self._settings.comando_antiguedad_max_s,
+        )
         ack = result.ack
         if result.changed:
             try:
                 self._store.set(serial, result.config)
             except OSError:
                 logger.exception("No se pudo persistir la config de %s", serial)
-                ack = error_ack(ack.get("comando_id"), "no se pudo persistir la configuración")
+                ack = error_ack(ack.get("id_comando"), "no se pudo persistir la configuración")
             else:
                 self._reschedule(serial, now)
                 self._source.apply_config(serial, result.config)

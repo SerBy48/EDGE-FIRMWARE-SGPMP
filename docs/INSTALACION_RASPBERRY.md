@@ -23,8 +23,9 @@ se reconecta y se reinicia solo.
 |---|---|
 | Hardware | Raspberry Pi 3 Model B, microSD de 16 GB o más (clase A1), fuente oficial 5 V / 2.5 A |
 | Red | WiFi 2.4 GHz (la Pi 3 no tiene 5 GHz) o cable Ethernet, con salida a internet |
-| Datos del ambiente dev | Host y puerto MQTT (en dev: TCP 1884, sin TLS), contraseña de `sgpmp_devices` (guía privada `GUIA_CONEXION_IOT_DEV.md`) |
-| Serial | Un serial registrado en `modulo9.dispositivos_iot` (ej. el del flujo F1: `TC-M09-G64-1789321890010`) |
+| Datos del ambiente dev | Host y puerto MQTT (en dev: TCP 1884, sin TLS; guía privada `GUIA_CONEXION_IOT_DEV.md`) |
+| Gateway Edge | Esta Raspberry registrada en la plataforma como dispositivo de tipo **Gateway Edge** (Configuración → Dispositivos IoT → Registrar). Su serial es el usuario MQTT. Los dispositivos (ESP32) se registran después eligiendo este Gateway Edge |
+| Credencial MQTT | La del Gateway Edge: Configuración → Dispositivos IoT → fila del Gateway Edge → "Credencial MQTT" (requiere permiso de actualizar dispositivos IoT). Cubre el serial del Edge y el de cada dispositivo activo asignado a él. La contraseña se muestra una sola vez |
 | Solo etapa B | Módulo SX1276/RFM95 **de 915 MHz** con antena, 7 cables dupont hembra-hembra |
 | Solo M3 | URL del API del broker (`https://<host>/v1`) y el token Bearer de servicio |
 
@@ -125,9 +126,9 @@ Valores para la **etapa A contra dev**:
 ```ini
 EDGE_MQTT_HOST=<host de dev>
 EDGE_MQTT_PORT=1884
-EDGE_MQTT_USERNAME=sgpmp_devices
-EDGE_MQTT_PASSWORD=<contraseña de dev>
-EDGE_SERIALS=TC-M09-G64-1789321890010
+EDGE_MQTT_USERNAME=<serial del Gateway Edge>
+EDGE_MQTT_PASSWORD=<contraseña generada en la plataforma>
+EDGE_SERIALS=<serial del Gateway Edge>,TC-M09-G64-1789321890010
 EDGE_HEARTBEAT_INTERVAL_S=300
 EDGE_FRECUENCIA_CAPTURA_MIN=10
 EDGE_INTERVALO_TRANSMISION_MIN=15
@@ -137,6 +138,16 @@ EDGE_FAKE_VARIABLES=temperatura_ambiente:C:20:30
 
 Notas:
 
+- Las tres primeras líneas de credencial (`EDGE_MQTT_USERNAME`,
+  `EDGE_MQTT_PASSWORD`, `EDGE_SERIALS`) las muestra la plataforma al generar la
+  credencial, listas para copiar. Si el broker rechaza la conexión con
+  "Not authorized", la credencial fue rotada o revocada: generar una nueva y
+  actualizar este archivo.
+- `EDGE_SERIALS` = serial del Gateway Edge primero, luego los dispositivos
+  activos asignados a él. Al asignar o quitar un dispositivo en la plataforma
+  el broker ajusta el permiso sin rotar la contraseña; aquí basta con editar
+  `EDGE_SERIALS` y reiniciar. Desactivar el Gateway Edge desactiva en cascada
+  sus dispositivos y revoca la credencial.
 - `EDGE_FAKE_VARIABLES`: el nombre debe existir en
   `modulo9.variables_ambientales`. Si no existe, el broker descarta la
   telemetría, pero heartbeat y comandos funcionan igual. Se puede dejar
@@ -275,9 +286,10 @@ EDGE_LORA_VARIABLES=1=temperatura_ambiente:C;2=humedad_relativa:%
 EDGE_LORA_RESET_GPIO=25
 ```
 
-- `EDGE_LORA_NODES`: `node_id=serial` por cada ESP32. Con serial por
-  ESP32, cada nodo lleva su serial y todos van en `EDGE_SERIALS`. Con serial
-  por sitio, todos los nodos apuntan al mismo serial.
+- `EDGE_LORA_NODES`: `node_id=serial` por cada ESP32, con el serial que se
+  registró en la plataforma bajo este Gateway Edge. Todos van en
+  `EDGE_SERIALS`. El serial del Edge no lleva nodo: publica su propio
+  heartbeat aunque no haya ESP32 escuchándose.
 - `EDGE_LORA_VARIABLES`: `code=nombre:unidad`. Los codes deben coincidir
   con los del firmware (`SENSOR_CODE_*`).
 
