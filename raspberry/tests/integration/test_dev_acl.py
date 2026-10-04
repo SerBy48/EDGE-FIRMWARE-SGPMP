@@ -1,11 +1,11 @@
-"""ACL de la credencial MQTT de la Raspberry (P3, P4, P6, P7, P8, E1, E2).
+"""ACL de la credencial MQTT del Gateway Edge (P3, P4, P6, P7, P8, E1, E2).
 
 Versión automática de las verificaciones de DOC_PRUEBA_ACL_EDGE_DEV.docx,
-actualizada a la credencial por Raspberry (TC-M09-250/251, SEG-BROKER-03 del
+actualizada a la credencial por Gateway Edge (TC-M09-250/251, SEG-BROKER-03 del
 broker): EDGE_MQTT_USERNAME/PASSWORD deben ser los generados en la plataforma
-para el primer serial de EDGE_SERIALS. Con la credencial compartida legacy
-`sgpmp_devices`, P7 y P8 fallan a propósito: es el riesgo que la credencial por
-Raspberry cierra.
+para el Gateway Edge, cuyo serial va primero en EDGE_SERIALS. Con la credencial
+compartida legacy `sgpmp_devices`, P7 y P8 fallan a propósito: es el riesgo que
+la credencial por Gateway Edge cierra.
 
 Usa MQTT 5 para que las publicaciones no autorizadas devuelvan PUBACK 135.
 P6/E1 requieren EDGE_IT_GATEWAY_USERNAME/PASSWORD; sin ellas se omiten.

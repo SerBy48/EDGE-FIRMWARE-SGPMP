@@ -52,28 +52,27 @@ a definir) al broker.
    Broker MQTT (BROKER-MQTT-SGPMP, ya en dev)
 ```
 
-Pendiente de decidir con el equipo: **¿el `serial` MQTT registrado en
-`modulo9.dispositivos_iot` identifica a la Raspberry (un serial agrega todos
-sus ESP32) o a cada ESP32 individualmente (la Raspberry reenvía N
-seriales)?**
+Decidido (RF-21, aprobado por el DBA): la Raspberry es el **Gateway Edge** y
+se registra en `modulo9.dispositivos_iot` con el tipo `GATEWAY_EDGE`; cada
+ESP32 es un dispositivo con su propio serial que apunta a su Edge
+(`id_dispositivo_gateway`, N:1). Desactivar el Edge desactiva sus
+dispositivos en cascada.
 
-- **No bloquea el cliente MQTT (M1).** Una sola conexión MQTT atiende 1 o N
-  seriales: la credencial propia de la Raspberry (TC-M09-250/251) lleva permiso
-  sobre cada serial que se marque al generarla, y `mqtt_client.py` trabaja
-  desde el inicio con una lista de seriales.
-- **Tampoco bloquea el protocolo LoRa:** la v1 mapea `node_id → serial` por
-  configuración en la Raspberry (`EDGE_LORA_NODES`, `PROTOCOLO_LORA.md` §3).
-  Cada nodo con su serial = modelo por ESP32; todos al mismo = modelo por
-  sitio. La decisión sigue siendo del equipo, pero se aplica sin cambiar
-  código.
+- **Cliente MQTT (M1):** una sola conexión por Gateway Edge atiende N
+  seriales. La credencial (TC-M09-250/251) es del Edge y el broker la deriva
+  de la BD: serial del Edge + dispositivos activos asignados a él.
+  `mqtt_client.py` ya trabaja con una lista de seriales.
+- **Protocolo LoRa:** la v1 mapea `node_id → serial` por configuración en la
+  Raspberry (`EDGE_LORA_NODES`, `PROTOCOLO_LORA.md` §3), un nodo por serial de
+  dispositivo.
 
 ## 1. Hitos del enlace persistente (sin dependencia de LoRa)
 
 ### M1 — Cliente MQTT persistente del edge_agent
 - Una conexión MQTT por Raspberry, `client_id` fijo y único
   (`edge-<serial_raspberry>`): dos clientes con el mismo `client_id` se
-  desconectan entre sí. La credencial es propia de la Raspberry (usuario =
-  serial principal), generada en la plataforma.
+  desconectan entre sí. La credencial es la del Gateway Edge (usuario =
+  serial del Edge), generada en la plataforma.
 - Sesión persistente: `clean_session=False` y suscripción a
   `sgpmp/<serial>/command` con QoS 1, para que Mosquitto encole los comandos
   durante cortes cortos. Publicaciones con QoS 1.
@@ -330,8 +329,8 @@ Lado servidor / equipo SGPMP (especificación):
    transición asíncrona `NO_CONF → APLICADA` (sección 2.2).
 6. `persistence true` en Mosquitto, para que los comandos encolados
    sobrevivan un reinicio del broker.
-7. Fecha de TLS en `dev`. La credencial ya es propia de cada Raspberry
-   (TC-M09-250/251); falta retirar la compartida `sgpmp_devices` cuando todas
+7. Fecha de TLS en `dev`. La credencial ya es propia de cada Gateway Edge
+   (TC-M09-250/251); falta retirar la compartida `sgpmp_devices` cuando todos
    migren.
 
 Lado edge / hardware:
