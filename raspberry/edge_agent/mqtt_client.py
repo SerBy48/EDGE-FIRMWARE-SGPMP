@@ -10,10 +10,18 @@ Sesión persistente (plan, M1):
 - `clean_session=False` + suscripción QoS 1: Mosquitto encola los comandos
   mientras la Raspberry está desconectada.
 - Reconexión automática de paho con backoff exponencial.
+
+Aviso de desconexión (TC-M09-63): con sesión persistente Mosquitto sigue
+listando la conexión después de que se cae, así que el broker no puede saber
+que el Edge está apagado. Se publica `{"tipo_mensaje": "DESCONEXION"}` en el
+`status` del Gateway (primer serial de EDGE_SERIALS): como Last Will si la
+conexión se corta y a mano antes de un cierre ordenado, porque en un
+DISCONNECT normal MQTT no envía el Last Will.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import ssl
@@ -28,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 _RECONNECT_MIN_S = 1
 _RECONNECT_MAX_S = 120
+# Lo que se espera el PUBACK del aviso de desconexión antes de cerrar.
+_AVISO_DESCONEXION_TIMEOUT_S = 2
+_AVISO_DESCONEXION = json.dumps({"tipo_mensaje": "DESCONEXION"}).encode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -65,6 +76,8 @@ class MqttLink:
             protocol=mqtt.MQTTv311,
         )
         self._client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
+        self._topic_aviso = settings.topic(settings.serials[0], settings.topic_status)
+        self._client.will_set(self._topic_aviso, _AVISO_DESCONEXION, qos=1, retain=False)
         if settings.mqtt_ca_cert:
             self._client.tls_set(
                 ca_certs=str(settings.mqtt_ca_cert), tls_version=ssl.PROTOCOL_TLS_CLIENT
@@ -97,6 +110,12 @@ class MqttLink:
         self._client.loop_start()
 
     def stop(self) -> None:
+        if self.connected:
+            try:
+                info = self._client.publish(self._topic_aviso, _AVISO_DESCONEXION, qos=1)
+                info.wait_for_publish(timeout=_AVISO_DESCONEXION_TIMEOUT_S)
+            except (RuntimeError, ValueError):
+                logger.warning("No se pudo avisar la desconexión al broker", exc_info=True)
         self._client.disconnect()
         self._client.loop_stop()
 

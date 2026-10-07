@@ -5,6 +5,16 @@ sube por MQTT al broker (`BROKER-MQTT-SGPMP`), siguiendo el contrato de
 `INTEGRACION_DISPOSITIVOS_RF23.md`. Mantiene una conexión MQTT persistente y
 responde los comandos RF-23 por sí solo: no requiere SSH para operar.
 
+También recibe los umbrales ambientales de RF-17 (`tipo_comando:
+"UMBRAL_AMBIENTAL"`, contrato en `INTEGRACION_DISPOSITIVOS_RF17.md` del broker):
+los guarda en `umbrales.json`, junto a `config.json`, y confirma con
+`ACK_UMBRAL`. Evaluar las lecturas contra esos umbrales es de RF-55.
+
+Al conectar declara un Last Will `{"tipo_mensaje": "DESCONEXION"}` en el
+`status` del Gateway (primer serial de `EDGE_SERIALS`) y lo publica a mano
+antes de un cierre ordenado: así el broker sabe al instante que el Edge está
+apagado y no espera los 30 s del ACK (TC-M09-63).
+
 **Estado: M1–M3 y Fase 2 implementados** (`../docs/PLAN_DESARROLLO.md`).
 `EDGE_SOURCE=lora` usa el SX1276 real; `EDGE_SOURCE=fake` usa datos
 sintéticos (desarrollo y pruebas contra el broker sin radio).
@@ -52,8 +62,8 @@ set -a; . ./mi-ambiente.env; set +a
 edge_agent/
   agent.py            # orquestación: agenda, comandos, buffer, heartbeat
   mqtt_client.py      # enlace paho → eventos en cola
-  commands.py         # validación RF-23 e idempotencia, armado del ACK
-  config_store.py     # config vigente por serial (JSON atómico)
+  commands.py         # validación RF-23/RF-17 e idempotencia, armado del ACK
+  config_store.py     # config vigente por serial y umbrales RF-17 (JSON atómico)
   buffer.py           # outbox SQLite (WAL) + estado_local_buffer
   sources.py          # DataSource + FakeLoraSource
   system.py           # reloj_sincronizado (timedatectl)
