@@ -374,5 +374,5 @@ Comandos útiles:
 systemctl status edge-agent
 journalctl -u edge-agent --since "1 hour ago"
 sudo systemctl restart edge-agent
-sudo ls -l /var/lib/sgpmp-edge/        # buffer.db y config.json
+sudo ls -l /var/lib/sgpmp-edge/        # buffer.db, config.json y umbrales.json
 ```

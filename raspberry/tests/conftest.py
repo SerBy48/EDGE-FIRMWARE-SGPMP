@@ -9,7 +9,7 @@ import pytest
 from edge_agent.agent import Agent
 from edge_agent.buffer import Buffer
 from edge_agent.config import FakeVariable, Settings
-from edge_agent.config_store import ConfigStore, DeviceConfig
+from edge_agent.config_store import ConfigStore, DeviceConfig, UmbralStore
 from edge_agent.sources import FakeLoraSource
 
 SERIAL = "IOT-TEST-001"
@@ -81,12 +81,14 @@ class Harness:
                 self.settings.default_intervalo_transmision_min,
             ),
         )
+        self.umbrales = UmbralStore(tmp_path / "umbrales.json")
         self.agent = Agent(
             self.settings,
             self.link,
             self.store,
             self.buffer,
             FakeLoraSource(self.settings.fake_variables),
+            umbrales=self.umbrales,
             reloj_sincronizado=lambda: True,
             clock=lambda: self.now,
         )
