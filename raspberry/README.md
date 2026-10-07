@@ -10,6 +10,11 @@ También recibe los umbrales ambientales de RF-17 (`tipo_comando:
 los guarda en `umbrales.json`, junto a `config.json`, y confirma con
 `ACK_UMBRAL`. Evaluar las lecturas contra esos umbrales es de RF-55.
 
+Al conectar declara un Last Will `{"tipo_mensaje": "DESCONEXION"}` en el
+`status` del Gateway (primer serial de `EDGE_SERIALS`) y lo publica a mano
+antes de un cierre ordenado: así el broker sabe al instante que el Edge está
+apagado y no espera los 30 s del ACK (TC-M09-63).
+
 **Estado: M1–M3 y Fase 2 implementados** (`../docs/PLAN_DESARROLLO.md`).
 `EDGE_SOURCE=lora` usa el SX1276 real; `EDGE_SOURCE=fake` usa datos
 sintéticos (desarrollo y pruebas contra el broker sin radio).
