@@ -25,7 +25,7 @@ revisión.
 | Hito / fase | Estado | Verificado | Falta |
 |---|---|---|---|
 | M1 — enlace MQTT persistente | Implementado | Tests unitarios y smoke contra un broker local | Sesión persistente contra el Mosquitto de dev (M3) |
-| M2 — operación sin SSH | Implementado | Tests (sd_notify), sintaxis del instalador | Instalación real en la Pi 3 |
+| M2 — operación sin SSH | Implementado, con actualización automática | Tests (sd_notify), sintaxis del instalador, elección de release y rollback del updater | Instalación real en la Pi 3; primer release firmado |
 | M3 — aceptación automática | Implementado | — | Ejecutar `pytest -m integration` contra dev |
 | Fase 0 — protocolo LoRa v1 | Propuesta implementada | Vectores idénticos en Python y C++ | Revisión del equipo de hardware; frecuencia/potencia con la ANE |
 | Fase 1 — firmware ESP32 | Implementado | Compila (`pio run`), tests del codec | Hardware real; drivers de sensores reales |
@@ -109,11 +109,15 @@ dispositivos en cascada.
 - Observabilidad remota por el heartbeat, con campos que ya existen en
   `HeartbeatPayload`: `version_firmware`, `estado_local_buffer`,
   `datos_pendientes_buffer`, `reloj_sincronizado`, `calidad_senal_*`.
-- Actualización remota del software: **decisión pendiente** (sección 4, punto 11).
-  No se puede hacer por MQTT sin topics nuevos, lo que requiere RFC
-  (`GUIA_CONEXION_IOT.md` §5).
+- Actualización remota del software (sección 4, punto 11, **decidido**):
+  release firmado + timer. `edge-updater.timer` revisa cada 3 horas los tags
+  `vX.Y.Z` de `main`, instala el más alto firmado por una clave de
+  `raspberry/release/allowed_signers` y hace rollback si el servicio no queda
+  sano. Es por pull, no por MQTT: no requiere topics nuevos ni RFC
+  (`GUIA_CONEXION_IOT.md` §5). Procedimiento en `docs/RELEASES.md`.
 - Entregables: `raspberry/systemd/edge-agent.service`,
-  `raspberry/scripts/install.sh`.
+  `raspberry/scripts/install.sh`, `raspberry/scripts/update.sh`,
+  `raspberry/systemd/edge-updater.{service,timer}`.
 
 ### M3 — Aceptación automática (reemplaza la prueba manual por SSH)
 - Test de integración contra `dev`: arrancar `edge_agent` con
@@ -339,8 +343,9 @@ Lado edge / hardware:
    en `EDGE_LORA_NODES`.
 10. Conectividad IP de la Raspberry en campo (WiFi / Ethernet / 4G) —
    dimensiona el buffer.
-11. Mecanismo de actualización remota del edge_agent (release firmado +
-    timer, paquete `.deb`, o VPN de emergencia).
+11. ~~Mecanismo de actualización remota del edge_agent~~ **Decidido**:
+    release firmado (tag `vX.Y.Z` en `main`, firma SSH) + timer cada 3 h con
+    rollback (sección M2, `docs/RELEASES.md`).
 12. Si el equipo de hardware ya tiene un formato de trama LoRa propio, este
     plan debe referenciarlo en vez de proponer uno nuevo.
 

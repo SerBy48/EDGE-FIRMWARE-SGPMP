@@ -23,7 +23,12 @@ jobs:
       - run: ruff format --check .
       - run: pytest -q
       - name: Sintaxis de scripts
-        run: bash -n scripts/install.sh
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+          shellcheck --severity=warning scripts/*.sh tests/updater/*.sh
+      - name: Actualización automática (elección de release y rollback)
+        # Root: update.sh solo instala como root. install.sh y systemctl son falsos.
+        run: sudo -E bash tests/updater/test_update.sh
 
   esp32:
     name: Firmware ESP32

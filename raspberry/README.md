@@ -19,12 +19,18 @@ apagado y no espera los 30 s del ACK (TC-M09-63).
 `EDGE_SOURCE=lora` usa el SX1276 real; `EDGE_SOURCE=fake` usa datos
 sintéticos (desarrollo y pruebas contra el broker sin radio).
 
-Instalación en la Raspberry (una vez; después, solo para actualizar):
+Instalación en la Raspberry (una vez; después las versiones nuevas llegan
+solas, ver abajo):
 
 ```bash
 sudo ./scripts/install.sh --env /ruta/edge-agent.env [--ca /ruta/ca.pem]
 journalctl -u edge-agent -f
 ```
+
+Actualización automática: `edge-updater.timer` revisa cada 3 horas los tags
+`vX.Y.Z` de `main` firmados por una clave de `release/allowed_signers`, los
+instala con `install.sh` y vuelve a la versión anterior si el servicio no queda
+sano. Cómo publicar un release: `../docs/RELEASES.md`.
 
 ## Qué hace
 
@@ -77,9 +83,14 @@ edge_agent/
     monitor.py        # monitor de enlace para pruebas de campo
 systemd/
   edge-agent.service  # Type=notify, Restart=always, WatchdogSec
+  edge-updater.*      # timer cada 3 h + servicio de actualización automática
   journald-sgpmp-edge.conf
 scripts/
   install.sh          # provisión/actualización idempotente
+  update.sh           # busca, verifica e instala el último release (rollback)
+release/
+  allowed_signers     # claves SSH que pueden firmar releases
 tests/
   integration/        # M3 — pytest -m integration (contra dev)
+  updater/            # update.sh contra un repo local (bash)
 ```

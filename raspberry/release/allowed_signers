@@ -1,0 +1,11 @@
+# Claves SSH autorizadas para firmar los releases (tags vX.Y.Z) del edge_agent.
+# La Raspberry solo instala un tag si `git verify-tag` lo valida con este
+# archivo (copiado a /etc/sgpmp/allowed_signers por install.sh).
+#
+# Formato, una línea por clave (pública, nunca la privada):
+#   <identificador> namespaces="git" ssh-ed25519 AAAA... comentario
+#
+# Agregar o quitar una clave es un cambio como cualquier otro: llega a los
+# equipos en un release firmado con una clave que ya esté aquí. Si este
+# archivo no tiene claves, no se instala ningún release automáticamente.
+# Cómo crear la clave y firmar: docs/RELEASES.md

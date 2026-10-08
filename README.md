@@ -16,6 +16,8 @@ de campo.
 3. Leer `docs/PLAN_DESARROLLO.md` — fases, estado y decisiones pendientes.
 4. Leer `docs/INSTALACION_RASPBERRY.md` — instalación paso a paso en la Pi.
 5. Leer `docs/PRUEBAS_CAMPO.md` — pruebas con hardware real (Fase 3).
+6. Leer `docs/RELEASES.md` — cómo publicar un release que las Raspberry
+   instalan solas.
 
 El contrato MQTT (topics, payload, credenciales) que el `edge_agent` de la
 Raspberry debe respetar está documentado en el repo `BROKER-MQTT-SGPMP`,

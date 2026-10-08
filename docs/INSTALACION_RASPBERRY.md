@@ -13,7 +13,8 @@ La instalación se hace en dos etapas:
   flasheados.
 
 SSH se usa **una sola vez**, para instalar. Después, el servicio arranca,
-se reconecta y se reinicia solo.
+se reconecta y se reinicia solo, y las versiones nuevas se instalan solas
+(sección 11).
 
 ---
 
@@ -101,14 +102,14 @@ no hace falta, porque el driver consulta las interrupciones por SPI.
 cd ~
 git clone https://github.com/SerBy48/EDGE-FIRMWARE-SGPMP.git
 cd EDGE-FIRMWARE-SGPMP
-git checkout develop        # mientras el PR #1 no esté fusionado: feature/plan-mqtt-persistente
+git tag -l 'v*' --sort=-v:refname | head -1   # último release, ej. v0.2.0
+git checkout v0.2.0         # ese tag; mientras no exista ningún release: develop
 git log --oneline -1
 ```
 
-Si el repositorio es privado, `git clone` pide usuario y un **token de acceso
-personal de GitHub** (no la contraseña de la cuenta). Crear uno en GitHub →
-Settings → Developer settings → Fine-grained tokens, con acceso de lectura a
-este repositorio. No guardarlo en la Pi después de clonar.
+Instalar un release (o `develop`) tal como está en GitHub, sin cambios
+locales: la actualización automática sigue desde ese commit y solo instala
+releases posteriores a él.
 
 ## 5. Preparar el archivo de configuración
 
@@ -165,17 +166,25 @@ sudo ./raspberry/scripts/install.sh --env ~/edge-agent.env
 
 El instalador (tarda 3–6 minutos en una Pi 3):
 
-1. Instala `python3`, `python3-venv`, `python3-dev` y `rsync`.
+1. Instala `python3`, `python3-venv`, `python3-dev`, `rsync`, `git` y
+   `openssh-client` (solo los que falten).
 2. Habilita NTP y el SPI (`raspi-config`).
 3. Crea el usuario de servicio `sgpmp-edge` (sin login) y lo agrega a los
    grupos `spi` y `gpio`.
-4. Copia el código a `/opt/sgpmp-edge/app` y crea el entorno virtual en
-   `/opt/sgpmp-edge/venv`.
+4. Copia el código a `/opt/sgpmp-edge/app`, crea el entorno virtual en
+   `/opt/sgpmp-edge/venv` y anota la versión instalada en
+   `/opt/sgpmp-edge/VERSION` (es la `version_firmware` del heartbeat).
 5. Copia la configuración a `/etc/sgpmp/edge-agent.env` (0600, root).
 6. **Valida la configuración** (`--check-config`). Si hay un error, se
    detiene sin arrancar nada y muestra qué variable falta o es inválida.
 7. Instala el servicio `edge-agent` y los logs persistentes de journald.
-8. Habilita el arranque automático y arranca el servicio.
+8. Instala la actualización automática: `edge-updater.timer` revisa cada 3
+   horas si hay un release nuevo (sección 11).
+9. Habilita el arranque automático y arranca el servicio.
+
+Para una Pi de laboratorio que no debe actualizarse sola, agregar
+`--no-auto-update` (deja `EDGE_UPDATE_ENABLED=0` en
+`/etc/sgpmp/edge-updater.env`).
 
 Al terminar, **borrar la copia local del archivo**:
 
@@ -202,7 +211,7 @@ journalctl -u edge-agent -f          # logs en vivo (Ctrl+C para salir)
 Líneas esperadas:
 
 ```
-edge_agent 0.1.0 arrancando: Settings(host='…', port=1884, serials=('TC-M09-…',))
+edge_agent v0.2.0 arrancando: Settings(host='…', port=1884, serials=('TC-M09-…',))
 Conectando a …:1884 como edge-TC-M09-… (TLS=False)
 Conectado (session_present=False)
 ```
@@ -219,6 +228,17 @@ posteriores debería ser `True`: eso confirma la sesión persistente.
   `Comando TC-M09-… → OK (aplicado)`.
 
 **Esto reemplaza la prueba manual por SSH del flujo F1.**
+
+### 7.2b Actualización automática
+
+```bash
+systemctl list-timers edge-updater.timer    # próxima ejecución (≤ 3 h)
+sudo /opt/sgpmp-edge/bin/update.sh --check  # qué release instalaría, sin instalar
+```
+
+`--check` debe terminar en `Sin releases nuevos` o `Instalaría vX.Y.Z`. Si
+dice que los tags `no tienen una firma`, falta la clave del que firma en
+`raspberry/release/allowed_signers` (ver `docs/RELEASES.md`).
 
 ### 7.3 Resiliencia (5 minutos)
 
@@ -336,22 +356,62 @@ Las pruebas completas con hardware están en `docs/PRUEBAS_CAMPO.md`.
 - Los logs quedan en la Pi hasta 3 meses (tope de 200 MB), por si hace falta
   diagnóstico en sitio.
 
+- Las versiones nuevas se instalan solas (sección 11); en el heartbeat,
+  `version_firmware` muestra el release que corre cada Pi.
+
 **Endurecer el acceso** una vez verificada la instalación: dejar SSH solo con
 clave (`PasswordAuthentication no` en `/etc/ssh/sshd_config`) o
-deshabilitarlo (`sudo systemctl disable --now ssh`). Mientras no exista el
-mecanismo de actualización remota (plan §4, punto 11), deshabilitarlo
-implica acceso físico para actualizar.
+deshabilitarlo (`sudo systemctl disable --now ssh`). Con la actualización
+automática, deshabilitarlo ya no obliga a ir al sitio para actualizar; sí
+para cambiar `/etc/sgpmp/edge-agent.env` o diagnosticar una falla que el
+rollback no resuelva.
 
 ## 11. Actualizar el software
 
+### Automática (por defecto)
+
+`edge-updater.timer` corre cada 3 horas (más hasta 30 min al azar, para que
+no se actualicen todas las Pi a la vez) y al encender si se perdió una
+ejecución. Cada vez:
+
+1. Trae los tags del repo a `/opt/sgpmp-edge/src` (un clon propio, aparte del
+   de la sección 4).
+2. Elige el tag `vX.Y.Z` más alto que esté en `main`, sea posterior a lo
+   instalado y esté **firmado** por una clave de
+   `/etc/sgpmp/allowed_signers`. Si no hay ninguno, no hace nada.
+3. Lo instala con `install.sh` (conserva `/etc/sgpmp/edge-agent.env`).
+4. Verifica que `edge-agent` siga activo 3 minutos sin reiniciarse. Si no,
+   **vuelve a la versión anterior** y registra el tag en
+   `/var/lib/sgpmp-edge-updater/failed`; tras 3 fallos deja de intentarlo.
+
+No exige conexión MQTT para darlo por sano: un corte de red no provoca
+rollback. El buffer y la config local (`/var/lib/sgpmp-edge/`) se conservan.
+
+```bash
+journalctl -u edge-updater                  # qué hizo en cada ejecución
+sudo systemctl start edge-updater           # buscar e instalar ya, sin esperar
+sudo /opt/sgpmp-edge/bin/update.sh --check  # qué instalaría, sin instalar
+```
+
+Pausar en un equipo: `EDGE_UPDATE_ENABLED=0` en
+`/etc/sgpmp/edge-updater.env` (se respeta en las próximas ejecuciones; las
+reinstalaciones no lo pisan). Para volver a intentar un tag que falló 3
+veces, borrar su línea de `/var/lib/sgpmp-edge-updater/failed`.
+
+Cómo publicar un release: `docs/RELEASES.md`.
+
+### Manual (alternativa)
+
+Sigue sirviendo, por ejemplo para instalar `develop` en una Pi de pruebas:
+
 ```bash
 cd ~/EDGE-FIRMWARE-SGPMP
-git pull
+git fetch --tags origin
+git checkout vX.Y.Z                      # un release, o: git checkout develop && git pull --ff-only
 sudo ./raspberry/scripts/install.sh     # sin --env: conserva /etc/sgpmp/edge-agent.env
 ```
 
-El buffer y la config local (`/var/lib/sgpmp-edge/`) se conservan entre
-actualizaciones.
+Después, la automática sigue desde lo que se instaló a mano.
 
 ## 12. Solución de problemas
 
@@ -367,6 +427,10 @@ actualizaciones.
 | `SX1276 no responde por SPI (RegVersion=0x00)` | Cableado, alimentación o SPI deshabilitado | Revisar la tabla de la sección 3, `ls /dev/spidev0.*`, reiniciar |
 | El monitor no ve tramas | Frecuencia, SF, sync word o `NET_ID` distintos a los del nodo | Igualar `EDGE_LORA_*` con los `build_flags` del ESP32 |
 | `code de variable N sin mapear` | Falta ese code en `EDGE_LORA_VARIABLES` | Agregarlo y reiniciar el servicio |
+| `edge-updater`: `vX.Y.Z no tiene una firma de …` | Tag sin firmar, o firmado con una clave que no está en `allowed_signers` | Firmar el tag con una clave autorizada (`docs/RELEASES.md`) |
+| `edge-updater`: `no desciende de lo instalado` | Se instaló a mano un commit que no está en `main` (ej. `develop` adelantado) | Normal: se actualiza cuando un release incluya ese commit; o instalar a mano el release |
+| `edge-updater`: `no hay /opt/sgpmp-edge/COMMIT` | Instalado desde una copia que no es un clon de git | Reinstalar desde un clon (sección 4) |
+| `edge-updater`: `rollback a … completo` | El release nuevo no arrancó o se reinició durante la verificación | `journalctl -u edge-agent` del momento de la actualización; corregir y publicar otro release |
 
 Comandos útiles:
 

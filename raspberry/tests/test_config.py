@@ -53,3 +53,17 @@ def test_variables_fake():
     assert [v.nombre for v in s.fake_variables] == ["temp", "hum"]
     with pytest.raises(ConfigError):
         Settings.from_env({**BASE_ENV, "EDGE_FAKE_VARIABLES": "temp:C:20"})
+
+
+def test_version_firmware_del_archivo_version(tmp_path):
+    version = tmp_path / "VERSION"
+    version.write_text("v0.2.0-3-gabc1234\n")
+    s = Settings.from_env({**BASE_ENV, "EDGE_VERSION_FILE": str(version)})
+    assert s.firmware_version == "v0.2.0-3-gabc1234"
+
+
+def test_version_firmware_sin_archivo_usa_la_del_paquete(tmp_path):
+    from edge_agent import __version__
+
+    s = Settings.from_env({**BASE_ENV, "EDGE_VERSION_FILE": str(tmp_path / "no-existe")})
+    assert s.firmware_version == __version__
