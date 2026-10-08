@@ -49,6 +49,7 @@ c5=$(commit cinco); tag_signed v0.1.3 "$TMP/other"         # clave no autorizada
 export EDGE_UPDATE_PREFIX="$TMP/prefix" EDGE_UPDATE_SRC="$TMP/src"
 export EDGE_UPDATE_STATE_DIR="$TMP/state" EDGE_UPDATE_LOCK="$TMP/lock"
 export EDGE_UPDATE_SIGNERS="$TMP/allowed_signers" EDGE_UPDATE_REPO="$origin"
+export EDGE_UPDATE_DEPLOY_KEY="$TMP/sin-deploy-key"
 mkdir -p "$TMP/prefix" "$TMP/state"
 
 failures=0
@@ -64,21 +65,28 @@ expect() {  # expect <commit instalado> <texto esperado en la salida>
   fi
 }
 
-expect "$c1" "Instalaría v0.1.1" "elige el tag firmado más alto en main"
-expect "$c1" "v0.1.3 no tiene una firma" "ignora una clave no autorizada"
-expect "$c1" "v0.1.2 no tiene una firma" "ignora un tag sin firma"
-expect "$c2" "Sin releases nuevos" "no reinstala lo que ya está"
+# Por defecto (EDGE_UPDATE_REQUIRE_SIGNATURE=0) la firma no se mira.
+expect "$c1" "Instalaría v0.1.3" "sin firma requerida: el tag más alto en main"
+expect "$c5" "Sin releases nuevos" "no reinstala lo que ya está"
 expect "$c3" "no desciende de lo instalado" "instalado desde develop: no baja de versión"
 
-printf 'v0.1.1\nv0.1.1\nv0.1.1\n' >"$TMP/state/failed"
-expect "$c1" "v0.1.1 falló 3 veces" "deja de intentar un tag que falló 3 veces"
+printf 'v0.1.3\nv0.1.3\nv0.1.3\n' >"$TMP/state/failed"
+expect "$c1" "v0.1.3 falló 3 veces" "deja de intentar un tag que falló 3 veces"
+expect "$c1" "Instalaría v0.1.2" "y pasa al siguiente"
 rm "$TMP/state/failed"
 
-: >"$TMP/allowed_signers"
-expect "$c1" "Sin releases nuevos" "sin claves autorizadas no instala nada"
-
+EDGE_UPDATE_DEPLOY_KEY="$TMP/trusted" expect "$c1" "Instalaría v0.1.3" "con clave de deploy presente"
 EDGE_UPDATE_ENABLED=0 expect "$c1" "deshabilitada" "respeta EDGE_UPDATE_ENABLED=0"
 expect "0000000000000000000000000000000000000000" "no está en" "commit instalado desconocido"
+
+export EDGE_UPDATE_REQUIRE_SIGNATURE=1
+expect "$c1" "Instalaría v0.1.1" "con firma requerida: el tag firmado más alto"
+expect "$c1" "v0.1.3 no tiene una firma" "con firma requerida: ignora una clave no autorizada"
+expect "$c1" "v0.1.2 no tiene una firma" "con firma requerida: ignora un tag sin firma"
+expect "$c2" "Sin releases nuevos" "con firma requerida: no reinstala lo que ya está"
+
+: >"$TMP/allowed_signers"
+expect "$c1" "Sin releases nuevos" "con firma requerida y sin claves no instala nada"
 
 if [[ $EUID -eq 0 ]]; then
   printf 'release namespaces="git" %s\n' "$(cat "$TMP/trusted.pub")" >"$TMP/allowed_signers"

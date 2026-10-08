@@ -8,10 +8,13 @@
 #
 # Uso:
 #   sudo ./raspberry/scripts/install.sh --env /ruta/edge-agent.env [--ca /ruta/ca.pem]
-#        [--no-start] [--no-auto-update]
+#        [--no-start] [--no-auto-update] [--deploy-key /ruta/deploy_key]
 #
-# La contraseña MQTT solo vive en /etc/sgpmp/edge-agent.env (0600, root).
-# Borrar el archivo de origen después de instalar.
+# --deploy-key: clave de deploy de GitHub (solo lectura) para seguir
+# actualizando cuando el repo sea privado; cambia EDGE_UPDATE_REPO a SSH.
+#
+# La contraseña MQTT y la clave de deploy solo viven en /etc/sgpmp (0600,
+# root). Borrar los archivos de origen después de instalar.
 set -euo pipefail
 
 SERVICE=edge-agent
@@ -28,8 +31,9 @@ env_src=""
 ca_src=""
 start=1
 auto_update=1
+deploy_key_src=""
 
-usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 log() { printf '[install] %s\n' "$*"; }
 die() { printf '[install] ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -39,6 +43,7 @@ while [[ $# -gt 0 ]]; do
     --ca) ca_src="${2:?falta la ruta de --ca}"; shift 2 ;;
     --no-start) start=0; shift ;;
     --no-auto-update) auto_update=0; shift ;;
+    --deploy-key) deploy_key_src="${2:?falta la ruta de --deploy-key}"; shift 2 ;;
     -h|--help) usage ;;
     *) usage 1 ;;
   esac
@@ -143,6 +148,11 @@ if [[ $auto_update -eq 0 ]]; then
   sed -i 's/^EDGE_UPDATE_ENABLED=.*/EDGE_UPDATE_ENABLED=0/' "$UPDATER_ENV"
   log "Deshabilitada en $UPDATER_ENV (--no-auto-update)"
 fi
+if [[ -n "$deploy_key_src" ]]; then
+  install -m 0600 -o root -g root "$deploy_key_src" "$CONF_DIR/deploy_key"
+  sed -i 's#^EDGE_UPDATE_REPO=https://github.com/#EDGE_UPDATE_REPO=git@github.com:#' "$UPDATER_ENV"
+  log "Clave de deploy en $CONF_DIR/deploy_key; repo por SSH en $UPDATER_ENV"
+fi
 
 systemctl daemon-reload
 systemctl enable "$SERVICE" >/dev/null
@@ -157,4 +167,5 @@ fi
 
 log "Listo. Logs: journalctl -u $SERVICE -f"
 [[ -n "$env_src" ]] && log "Recordatorio: borrar $env_src (tiene la contraseña MQTT)"
+[[ -n "$deploy_key_src" ]] && log "Recordatorio: borrar $deploy_key_src (clave de deploy)"
 exit 0

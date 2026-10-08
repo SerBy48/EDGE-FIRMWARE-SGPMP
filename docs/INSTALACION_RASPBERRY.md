@@ -111,6 +111,19 @@ Instalar un release (o `develop`) tal como está en GitHub, sin cambios
 locales: la actualización automática sigue desde ese commit y solo instala
 releases posteriores a él.
 
+**Si el repo ya es privado**, clonar con la clave de deploy del repo
+(`docs/RELEASES.md` §4). Copiarla primero a `~/deploy_key` (por ejemplo con
+`scp`) y:
+
+```bash
+chmod 600 ~/deploy_key
+GIT_SSH_COMMAND="ssh -i ~/deploy_key -o IdentitiesOnly=yes" \
+  git clone git@github.com:SerBy48/EDGE-FIRMWARE-SGPMP.git
+```
+
+En el paso 6 se instala con `--deploy-key ~/deploy_key` para que la
+actualización automática la siga usando.
+
 ## 5. Preparar el archivo de configuración
 
 El archivo tiene la contraseña MQTT: se escribe con un editor, no con `echo`
@@ -186,6 +199,10 @@ Para una Pi de laboratorio que no debe actualizarse sola, agregar
 `--no-auto-update` (deja `EDGE_UPDATE_ENABLED=0` en
 `/etc/sgpmp/edge-updater.env`).
 
+Con el repo privado (o para dejar la Pi lista antes de que lo sea), agregar
+`--deploy-key ~/deploy_key`: la guarda en `/etc/sgpmp/deploy_key` (0600, root)
+y la actualización automática descarga por SSH. Después, `shred -u ~/deploy_key`.
+
 Al terminar, **borrar la copia local del archivo**:
 
 ```bash
@@ -237,8 +254,8 @@ sudo /opt/sgpmp-edge/bin/update.sh --check  # qué release instalaría, sin inst
 ```
 
 `--check` debe terminar en `Sin releases nuevos` o `Instalaría vX.Y.Z`. Si
-dice que los tags `no tienen una firma`, falta la clave del que firma en
-`raspberry/release/allowed_signers` (ver `docs/RELEASES.md`).
+falla al descargar, revisar la salida a internet y, con el repo privado, la
+clave de deploy (tabla de la sección 12).
 
 ### 7.3 Resiliencia (5 minutos)
 
@@ -376,9 +393,9 @@ ejecución. Cada vez:
 
 1. Trae los tags del repo a `/opt/sgpmp-edge/src` (un clon propio, aparte del
    de la sección 4).
-2. Elige el tag `vX.Y.Z` más alto que esté en `main`, sea posterior a lo
-   instalado y esté **firmado** por una clave de
-   `/etc/sgpmp/allowed_signers`. Si no hay ninguno, no hace nada.
+2. Elige el tag `vX.Y.Z` más alto que esté en `main` y sea posterior a lo
+   instalado (si se activó la firma, además firmado: `docs/RELEASES.md` §5).
+   Si no hay ninguno, no hace nada.
 3. Lo instala con `install.sh` (conserva `/etc/sgpmp/edge-agent.env`).
 4. Verifica que `edge-agent` siga activo 3 minutos sin reiniciarse. Si no,
    **vuelve a la versión anterior** y registra el tag en
@@ -427,7 +444,8 @@ Después, la automática sigue desde lo que se instaló a mano.
 | `SX1276 no responde por SPI (RegVersion=0x00)` | Cableado, alimentación o SPI deshabilitado | Revisar la tabla de la sección 3, `ls /dev/spidev0.*`, reiniciar |
 | El monitor no ve tramas | Frecuencia, SF, sync word o `NET_ID` distintos a los del nodo | Igualar `EDGE_LORA_*` con los `build_flags` del ESP32 |
 | `code de variable N sin mapear` | Falta ese code en `EDGE_LORA_VARIABLES` | Agregarlo y reiniciar el servicio |
-| `edge-updater`: `vX.Y.Z no tiene una firma de …` | Tag sin firmar, o firmado con una clave que no está en `allowed_signers` | Firmar el tag con una clave autorizada (`docs/RELEASES.md`) |
+| `edge-updater`: `Repository not found`, `Authentication failed` o `Permission denied (publickey)` | El repo es privado y la Pi no tiene clave de deploy, o la clave fue borrada en GitHub | Instalar la clave: `install.sh --deploy-key` (`docs/RELEASES.md` §4) |
+| `edge-updater`: `vX.Y.Z no tiene una firma de …` | Firma activada (`EDGE_UPDATE_REQUIRE_SIGNATURE=1`) y el tag no está firmado por una clave de `allowed_signers` | Firmar el tag con una clave autorizada (`docs/RELEASES.md` §5) |
 | `edge-updater`: `no desciende de lo instalado` | Se instaló a mano un commit que no está en `main` (ej. `develop` adelantado) | Normal: se actualiza cuando un release incluya ese commit; o instalar a mano el release |
 | `edge-updater`: `no hay /opt/sgpmp-edge/COMMIT` | Instalado desde una copia que no es un clon de git | Reinstalar desde un clon (sección 4) |
 | `edge-updater`: `rollback a … completo` | El release nuevo no arrancó o se reinició durante la verificación | `journalctl -u edge-agent` del momento de la actualización; corregir y publicar otro release |

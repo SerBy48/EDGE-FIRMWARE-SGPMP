@@ -2,9 +2,10 @@
 # Actualización automática del edge_agent desde los releases del repo.
 #
 # La corre edge-updater.timer cada 3 horas (como root). Instala el tag vX.Y.Z
-# más alto que esté en origin/main, sea posterior a lo instalado y esté
-# firmado por una clave de /etc/sgpmp/allowed_signers. Si después de instalar
-# el servicio no queda sano, vuelve a la versión anterior.
+# más alto que esté en origin/main y sea posterior a lo instalado (con
+# EDGE_UPDATE_REQUIRE_SIGNATURE=1, además firmado por una clave de
+# /etc/sgpmp/allowed_signers). Si después de instalar el servicio no queda
+# sano, vuelve a la versión anterior.
 #
 # Uso:
 #   sudo /opt/sgpmp-edge/bin/update.sh [--check]
@@ -24,6 +25,9 @@ LOCK=${EDGE_UPDATE_LOCK:-/run/sgpmp-edge-install.lock}
 REPO=${EDGE_UPDATE_REPO:-https://github.com/SerBy48/EDGE-FIRMWARE-SGPMP.git}
 BRANCH=${EDGE_UPDATE_BRANCH:-main}
 HEALTH_S=${EDGE_UPDATE_HEALTH_S:-180}
+REQUIRE_SIGNATURE=${EDGE_UPDATE_REQUIRE_SIGNATURE:-0}
+# Repo privado: clave de deploy de GitHub (solo lectura) y REPO por SSH.
+DEPLOY_KEY=${EDGE_UPDATE_DEPLOY_KEY:-/etc/sgpmp/deploy_key}
 # Intentos fallidos de un mismo tag antes de dejar de probarlo. No es 1 porque
 # un corte de red en pleno pip install también cuenta como fallo.
 MAX_FAILS=3
@@ -31,7 +35,7 @@ MAX_FAILS=3
 # A stderr: pick_release devuelve el tag por stdout.
 log() { printf '[update] %s\n' "$*" >&2; }
 die() { printf '[update] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 # El clon es de root; safe.directory evita el rechazo de git en pruebas.
 g() { git -C "$SRC" -c safe.directory='*' "$@"; }
@@ -65,7 +69,7 @@ pick_release() {
       log "$tag falló $MAX_FAILS veces, se omite"
       continue
     fi
-    if ! signed "$tag"; then
+    if [[ $REQUIRE_SIGNATURE == 1 ]] && ! signed "$tag"; then
       log "$tag no tiene una firma de $SIGNERS, se omite"
       continue
     fi
@@ -116,6 +120,12 @@ main() {
   exec 9>"$LOCK"
   flock -n 9 || die "hay otra instalación o actualización en curso"
 
+  if [[ -f "$DEPLOY_KEY" ]]; then
+    # accept-new: la huella de github.com se fija en la primera conexión.
+    export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes \
+-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$STATE_DIR/known_hosts"
+    mkdir -p "$STATE_DIR"
+  fi
   if [[ ! -d "$SRC/.git" ]]; then
     log "Clonando $REPO en $SRC"
     git clone --quiet --no-checkout "$REPO" "$SRC"

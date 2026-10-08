@@ -28,9 +28,9 @@ journalctl -u edge-agent -f
 ```
 
 Actualización automática: `edge-updater.timer` revisa cada 3 horas los tags
-`vX.Y.Z` de `main` firmados por una clave de `release/allowed_signers`, los
-instala con `install.sh` y vuelve a la versión anterior si el servicio no queda
-sano. Cómo publicar un release: `../docs/RELEASES.md`.
+`vX.Y.Z` de `main`, los instala con `install.sh` y vuelve a la versión anterior
+si el servicio no queda sano. Firma de tags opcional y clave de deploy para
+cuando el repo sea privado. Cómo publicar un release: `../docs/RELEASES.md`.
 
 ## Qué hace
 
@@ -89,7 +89,7 @@ scripts/
   install.sh          # provisión/actualización idempotente
   update.sh           # busca, verifica e instala el último release (rollback)
 release/
-  allowed_signers     # claves SSH que pueden firmar releases
+  allowed_signers     # claves que pueden firmar releases (firma opcional)
 tests/
   integration/        # M3 — pytest -m integration (contra dev)
   updater/            # update.sh contra un repo local (bash)
