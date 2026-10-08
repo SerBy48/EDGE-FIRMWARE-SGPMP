@@ -1,0 +1,21 @@
+# SGPMP — actualización automática del edge_agent (scripts/update.sh).
+# La dispara edge-updater.timer; a mano: sudo systemctl start edge-updater
+# Instalado por scripts/install.sh; no editar en el equipo (se sobreescribe).
+# Configuración: /etc/sgpmp/edge-updater.env
+
+[Unit]
+Description=SGPMP edge_agent: instalar el último release firmado
+Wants=network-online.target
+After=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+# Root: instala paquetes, código y unidades de systemd (igual que install.sh).
+EnvironmentFile=-/etc/sgpmp/edge-updater.env
+ExecStart=/opt/sgpmp-edge/bin/update.sh
+# /var/lib/sgpmp-edge-updater: tags que fallaron (no reintentar en bucle).
+StateDirectory=sgpmp-edge-updater
+# pip install en una Pi 3 tarda varios minutos, más la verificación y un
+# posible rollback.
+TimeoutStartSec=45min
+Nice=10

@@ -129,7 +129,21 @@ class Settings:
             fake_variables=_parse_fake_variables(env.get("EDGE_FAKE_VARIABLES", "")),
             comando_antiguedad_max_s=_positive_float(env, "EDGE_COMANDO_ANTIGUEDAD_MAX_S", 120.0),
             lora=lora,
+            firmware_version=_firmware_version(env),
         )
+
+
+def _firmware_version(env: Mapping[str, str]) -> str:
+    """Release instalado (`git describe` que escribe install.sh) o la del paquete.
+
+    Va en `version_firmware` del heartbeat: así el servidor ve qué release corre
+    cada Raspberry después de una actualización automática.
+    """
+    path = Path(env.get("EDGE_VERSION_FILE", "/opt/sgpmp-edge/VERSION"))
+    try:
+        return path.read_text(encoding="utf-8").strip() or __version__
+    except OSError:
+        return __version__
 
 
 def _require(env: Mapping[str, str], name: str) -> str:
