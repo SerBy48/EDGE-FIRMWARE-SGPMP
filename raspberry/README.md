@@ -30,7 +30,8 @@ journalctl -u edge-agent -f
 Actualización automática: `edge-updater.timer` revisa cada 3 horas los tags
 `vX.Y.Z` de `main`, los instala con `install.sh` y vuelve a la versión anterior
 si el servicio no queda sano. Firma de tags opcional y clave de deploy para
-cuando el repo sea privado. Cómo publicar un release: `../docs/RELEASES.md`.
+cuando el repo sea privado. Los tags los crea el CI a partir de los commits
+(versionamiento automático): `../docs/RELEASES.md`.
 
 ## Qué hace
 

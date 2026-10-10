@@ -5,9 +5,12 @@ tag `vX.Y.Z` nuevo **que esté en `main`**, lo instalan y, si el servicio no
 queda sano, vuelven a la versión anterior (detalle en
 `INSTALACION_RASPBERRY.md` §11).
 
-Crear un tag `v*` en `main` es, en la práctica, desplegar a todos los
-equipos. Este documento es el procedimiento para hacerlo y para mantenerlo
-seguro.
+Los tags los crea el CI (**versionamiento automático**, mismo esquema que
+`BROKER-MQTT-SGPMP`): la versión sale de los mensajes de commit, `develop`
+publica release candidates (`v0.3.0-rc.1`, las Pi los ignoran) y un merge a
+`main` con cambios publica la versión final (`v0.3.0`). En la práctica,
+**fusionar en `main` un `feat` o un `fix` es desplegar a todos los equipos.**
+Este documento es el procedimiento para hacerlo y para mantenerlo seguro.
 
 ## 1. Una sola vez: quién puede desplegar
 
@@ -17,34 +20,59 @@ en GitHub (repo → Settings):
 - **Rules → Rulesets → New branch ruleset** sobre `main`: PR obligatorio con
   aprobación, sin push directo ni force push (convención Git Flow del repo).
 - **Rules → Rulesets → New tag ruleset** sobre `v*`: restringir creación,
-  actualización y borrado; *bypass* solo para los administradores que publican
-  releases.
+  actualización y borrado; *bypass* solo para la cuenta del `GH_TOKEN` (el
+  CI crea los tags).
 - **Collaborators**: revisar periódicamente quién tiene acceso y con qué rol.
+- **Settings → Secrets and variables → Actions → New repository secret**
+  `GH_TOKEN`: un token personal (*fine-grained*, solo este repo, permiso
+  *Contents: Read and write*) de una cuenta que esté en el *bypass* de los
+  rulesets de `main`, `develop` y `v*`. El CI lo usa para empujar el commit de
+  release, el tag y el merge de `main` a `develop`; el token automático de
+  Actions no puede, porque no está en el bypass. Al vencer o al traspasar el
+  proyecto, reemplazarlo por uno del nuevo responsable (es el mismo esquema
+  que el broker).
 
-Con esto, desplegar requiere ser administrador del repo, y el código del
-release pasó por un PR revisado. Si más adelante hace falta más garantía
-(muchos colaboradores, equipos críticos), activar la firma de tags (§5).
+Con esto, desplegar requiere un PR revisado hacia `main` con el CI en verde.
+Si más adelante hace falta más garantía (muchos colaboradores, equipos
+críticos), ver la firma de tags (§5).
 
 ## 2. Publicar un release
 
-1. En `develop`, subir la versión en `raspberry/pyproject.toml` y
-   `raspberry/edge_agent/__init__.py` (ej. `0.2.0`), por PR.
-2. PR `develop → main` con el CI en verde.
-3. Probar `main` en una Pi de laboratorio instalada con `--no-auto-update`
+La versión la decide el tipo de commit (Conventional Commits), desde el último
+tag final (el primero, `v0.1.0`, se creó a mano):
+
+| Commit | Release |
+|---|---|
+| `feat(...)` | menor: `0.2.0 → 0.3.0` |
+| `fix`, `perf`, `refactor` | parche: `0.2.0 → 0.2.1` |
+| `feat!:` o `BREAKING CHANGE:` en el cuerpo | mayor: `0.2.0 → 1.0.0` |
+| `docs`, `chore`, `test`, `ci` | ninguno |
+
+Los PR se fusionan con *merge commit* (como hasta ahora), así cuentan los
+commits de la rama. Con *squash*, lo que cuenta es el título del PR, que
+entonces tiene que seguir el mismo formato.
+
+1. Cada PR a `develop` publica un `vX.Y.Z-rc.N` (si trae `feat`/`fix`/...).
+   Las Pi no los instalan: sirven para saber qué versión saldrá.
+2. Probar `develop` en una Pi de laboratorio instalada con `--no-auto-update`
    (instalación manual, `INSTALACION_RASPBERRY.md` §11).
-4. Crear el tag sobre `main` y publicarlo:
-
-   ```bash
-   git checkout main && git pull --ff-only
-   git tag -a v0.2.0 -m "v0.2.0: <resumen>"
-   git push origin v0.2.0
-   ```
-
-   También sirve crear el release desde GitHub (Releases → *Draft a new
-   release*, tag nuevo `v0.2.0`, target `main`).
-5. Seguimiento: en ≤ 3,5 h cada equipo publica `version_firmware=v0.2.0` en el
-   heartbeat. Para no esperar en un equipo con acceso:
+3. PR `develop → main`. Al fusionarlo, con el CI en verde, el job
+   *Versionamiento*:
+   - crea el tag `vX.Y.Z` y el GitHub Release con las notas;
+   - hace el commit `chore(release): X.Y.Z [skip ci]` en `main` con
+     `CHANGELOG.md` y la versión en `raspberry/pyproject.toml` y
+     `raspberry/edge_agent/__init__.py`;
+   - fusiona `main` de vuelta en `develop`, para que los siguientes rc partan
+     de la versión nueva.
+4. Seguimiento: en ≤ 3,5 h cada equipo publica `version_firmware=vX.Y.Z` en
+   el heartbeat. Para no esperar en un equipo con acceso:
    `sudo systemctl start edge-updater` y `journalctl -u edge-updater`.
+
+Para fusionar en `main` sin desplegar, el PR solo puede traer commits que no
+generan release (`docs`, `chore`, `ci`, `test`).
+
+Si el job falla, el tag no se crea y las Pi no cambian: revisar el log del job
+en Actions, corregir y volver a correrlo (*Re-run jobs*).
 
 ## 3. Reglas
 
@@ -53,8 +81,13 @@ release pasó por un PR revisado. Si más adelante hace falta más garantía
   `umbrales.json`), y la anterior tiene que seguir leyéndolo después: el
   rollback reinstala código, no deshace cambios de datos.
 - **Nunca mover ni borrar un tag publicado.** Para retirar un release malo,
-  publicar uno nuevo más alto (ej. `v0.2.1` con el revert). Las Pi nunca bajan
-  de versión solas.
+  publicar uno nuevo más alto (un `fix` o un `revert` por PR: sale `v0.2.1`).
+  Las Pi nunca bajan de versión solas.
+- **No editar a mano** `CHANGELOG.md` ni la versión en `pyproject.toml` /
+  `__init__.py`: los escribe el CI en `main`. Si `develop` también los toca,
+  el merge automático de `main` a `develop` choca; en ese caso el job falla y
+  hay que hacerlo por PR (rama desde `develop`, `git merge origin/main`,
+  resolver, PR con *merge commit*).
 - **El rollback automático solo cubre** que el servicio no arranque o se
   reinicie en los primeros 3 minutos. Un error de lógica que no tumba el
   proceso (datos mal enviados, comandos mal aplicados) no lo detecta: eso lo
@@ -106,6 +139,11 @@ Las Pi nuevas, ya con el repo privado, se instalan con la clave desde el
 principio (`INSTALACION_RASPBERRY.md` §4 y §6).
 
 ## 5. Opcional: exigir tags firmados
+
+**No es compatible con el versionamiento automático**: los tags los crea el
+CI, que no tiene la clave de firma de nadie. Activarlo implica volver a crear
+los tags a mano (o darle al CI una clave de firma propia en un secret, que
+pasa a ser tan sensible como el `GH_TOKEN`).
 
 Con `EDGE_UPDATE_REQUIRE_SIGNATURE=1` en `/etc/sgpmp/edge-updater.env`, la Pi
 solo instala tags firmados por una clave de

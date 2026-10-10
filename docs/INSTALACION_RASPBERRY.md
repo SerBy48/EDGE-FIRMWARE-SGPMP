@@ -102,8 +102,9 @@ no hace falta, porque el driver consulta las interrupciones por SPI.
 cd ~
 git clone https://github.com/SerBy48/EDGE-FIRMWARE-SGPMP.git
 cd EDGE-FIRMWARE-SGPMP
-git tag -l 'v*' --sort=-v:refname | head -1   # último release, ej. v0.2.0
-git checkout v0.2.0         # ese tag; mientras no exista ningún release: develop
+# último release final (sin los -rc de develop), ej. v0.2.0
+git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1
+git checkout v0.2.0         # ese tag
 git log --oneline -1
 ```
 

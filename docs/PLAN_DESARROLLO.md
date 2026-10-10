@@ -25,7 +25,7 @@ revisión.
 | Hito / fase | Estado | Verificado | Falta |
 |---|---|---|---|
 | M1 — enlace MQTT persistente | Implementado | Tests unitarios y smoke contra un broker local | Sesión persistente contra el Mosquitto de dev (M3) |
-| M2 — operación sin SSH | Implementado, con actualización automática | Tests (sd_notify), sintaxis del instalador, elección de release y rollback del updater | Instalación real en la Pi 3; primer release; reglas de GitHub para `main` y tags `v*` |
+| M2 — operación sin SSH | Implementado, con actualización automática | Tests (sd_notify), sintaxis del instalador, elección de release y rollback del updater | Instalación real en la Pi 3; reglas de GitHub para `main` y tags `v*`; secret `GH_TOKEN` del versionamiento automático |
 | M3 — aceptación automática | Implementado | — | Ejecutar `pytest -m integration` contra dev |
 | Fase 0 — protocolo LoRa v1 | Propuesta implementada | Vectores idénticos en Python y C++ | Revisión del equipo de hardware; frecuencia/potencia con la ANE |
 | Fase 1 — firmware ESP32 | Implementado | Compila (`pio run`), tests del codec | Hardware real; drivers de sensores reales |
