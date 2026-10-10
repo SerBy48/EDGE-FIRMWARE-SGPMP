@@ -53,6 +53,10 @@ signed() {
   g -c gpg.ssh.allowedSignersFile="$SIGNERS" verify-tag "$1" >/dev/null 2>&1
 }
 
+# Solo versiones finales: los release candidates de develop (v0.3.0-rc.1)
+# llegan a main con el merge, y git los ordena por encima de v0.3.0.
+FINAL_TAG='^v[0-9]+\.[0-9]+\.[0-9]+$'
+
 # Primer tag (de mayor a menor versión) en origin/$BRANCH que venga después
 # del commit instalado, esté firmado y no haya fallado MAX_FAILS veces.
 pick_release() {
@@ -75,7 +79,7 @@ pick_release() {
     fi
     echo "$tag"
     return
-  done < <(g tag -l 'v[0-9]*' --sort=-v:refname --merged "origin/$BRANCH")
+  done < <(g tag -l 'v[0-9]*' --sort=-v:refname --merged "origin/$BRANCH" | grep -E "$FINAL_TAG")
 }
 
 # Sano = activo durante HEALTH_S sin que systemd lo reinicie. No se exige

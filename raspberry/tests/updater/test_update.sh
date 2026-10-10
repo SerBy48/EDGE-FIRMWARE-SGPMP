@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prueba de scripts/update.sh contra un repo local con tags firmados, sin
-# firmar, con una clave no autorizada y fuera de main. install.sh y systemctl
-# son falsos: no toca el sistema.
+# firmar, con una clave no autorizada, fuera de main y release candidates.
+# install.sh y systemctl son falsos: no toca el sistema.
 #
 # Uso (desde raspberry/):
 #   bash tests/updater/test_update.sh        # elección de release (--check)
@@ -44,6 +44,7 @@ c3=$(commit develop); tag_signed v0.9.0 "$TMP/trusted"   # fuera de main
 o checkout -q main
 c4=$(commit cuatro); o tag -a v0.1.2 -m v0.1.2           # sin firma
 c5=$(commit cinco); tag_signed v0.1.3 "$TMP/other"         # clave no autorizada
+commit rc >/dev/null; tag_signed v0.2.0-rc.1 "$TMP/trusted"  # release candidate
 : "$c4" "$c5"
 
 export EDGE_UPDATE_PREFIX="$TMP/prefix" EDGE_UPDATE_SRC="$TMP/src"
@@ -68,6 +69,7 @@ expect() {  # expect <commit instalado> <texto esperado en la salida>
 # Por defecto (EDGE_UPDATE_REQUIRE_SIGNATURE=0) la firma no se mira.
 expect "$c1" "Instalaría v0.1.3" "sin firma requerida: el tag más alto en main"
 expect "$c5" "Sin releases nuevos" "no reinstala lo que ya está"
+expect "$c5" "Sin releases nuevos" "ignora release candidates (v0.2.0-rc.1)"
 expect "$c3" "no desciende de lo instalado" "instalado desde develop: no baja de versión"
 
 printf 'v0.1.3\nv0.1.3\nv0.1.3\n' >"$TMP/state/failed"
