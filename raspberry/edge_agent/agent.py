@@ -1,7 +1,7 @@
 """Orquestación del edge_agent.
 
 Un único hilo maneja todo el estado: agenda de captura/transmisión/heartbeat
-por serial, comandos RF-23 y vaciado del buffer. El hilo de paho solo entrega
+por serial, comandos RF-23 y RF-17 (umbrales) y vaciado del buffer. El hilo de paho solo entrega
 eventos por una cola (`mqtt_client.py`).
 
 Reglas de `docs/PLAN_DESARROLLO.md` sección 2:
@@ -27,9 +27,15 @@ from typing import Any, Protocol
 
 from edge_agent import buffer as buf
 from edge_agent.buffer import Buffer
-from edge_agent.commands import error_ack, handle_command
+from edge_agent.commands import (
+    TIPO_ACK_UMBRAL,
+    TIPO_COMANDO_UMBRAL,
+    error_ack,
+    handle_command,
+    handle_umbral,
+)
 from edge_agent.config import Settings
-from edge_agent.config_store import ConfigStore
+from edge_agent.config_store import ConfigStore, UmbralStore
 from edge_agent.mqtt_client import Connected, Event, Message, PubAck
 from edge_agent.sources import DataSource, Reading
 from edge_agent.system import ntp_sincronizado
@@ -68,6 +74,7 @@ class Agent:
         buffer: Buffer,
         source: DataSource,
         *,
+        umbrales: UmbralStore,
         reloj_sincronizado: Callable[[], bool] = ntp_sincronizado,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -76,6 +83,7 @@ class Agent:
         self._store = store
         self._buffer = buffer
         self._source = source
+        self._umbrales = umbrales
         self._reloj_sincronizado = reloj_sincronizado
         self._clock = clock
         self._inflight: dict[int, tuple[int, float]] = {}  # mid -> (row_id, enviado_en)
@@ -160,19 +168,11 @@ class Agent:
             logger.warning("Comando en topic ajeno a este edge: %s", topic)
             return
 
-        result = handle_command(payload, self._store.get(serial))
-        ack = result.ack
-        if result.changed:
-            try:
-                self._store.set(serial, result.config)
-            except OSError:
-                logger.exception("No se pudo persistir la config de %s", serial)
-                ack = error_ack(ack.get("comando_id"), "no se pudo persistir la configuración")
-            else:
-                self._reschedule(serial, now)
-                self._source.apply_config(serial, result.config)
-        detalle = ack.get("motivo") or ("aplicado" if result.changed else "sin cambios")
-        logger.info("Comando %s → %s (%s)", serial, ack["resultado"], detalle)
+        data = _json_object(payload)
+        if data is not None and data.get("tipo_comando") == TIPO_COMANDO_UMBRAL:
+            ack = self._on_umbral(serial, data, now)
+        else:
+            ack = self._on_configuracion(serial, payload, now)
 
         self._buffer.enqueue(
             serial=serial,
@@ -183,6 +183,53 @@ class Agent:
             now=now,
         )
         self._flush(now)
+
+    def _on_configuracion(self, serial: str, payload: bytes, now: float) -> dict[str, Any]:
+        result = handle_command(
+            payload,
+            self._store.get(serial),
+            ahora=now if self._reloj_sincronizado() else None,
+            antiguedad_max_s=self._settings.comando_antiguedad_max_s,
+        )
+        ack = result.ack
+        if result.changed:
+            try:
+                self._store.set(serial, result.config)
+            except OSError:
+                logger.exception("No se pudo persistir la config de %s", serial)
+                ack = error_ack(ack.get("id_comando"), "no se pudo persistir la configuración")
+            else:
+                self._reschedule(serial, now)
+                self._source.apply_config(serial, result.config)
+        detalle = ack.get("motivo") or ("aplicado" if result.changed else "sin cambios")
+        logger.info("Comando %s → %s (%s)", serial, ack["resultado"], detalle)
+        return ack
+
+    def _on_umbral(self, serial: str, data: dict[str, Any], now: float) -> dict[str, Any]:
+        result = handle_umbral(
+            data,
+            self._umbrales.get(data.get("id_umbral_ambiental")),
+            ahora=now if self._reloj_sincronizado() else None,
+            antiguedad_max_s=self._settings.comando_antiguedad_max_s,
+        )
+        ack = result.ack
+        if result.umbral is not None:
+            try:
+                self._umbrales.set(result.umbral)
+            except OSError:
+                logger.exception("No se pudo persistir el umbral recibido por %s", serial)
+                ack = error_ack(
+                    ack.get("id_comando"), "no se pudo persistir el umbral", tipo=TIPO_ACK_UMBRAL
+                )
+        detalle = ack.get("motivo") or ("guardado" if result.umbral else "sin cambios")
+        logger.info(
+            "Umbral %s (%s) → %s (%s)",
+            data.get("id_umbral_ambiental"),
+            data.get("variable"),
+            ack["resultado"],
+            detalle,
+        )
+        return ack
 
     def _serial_from_command_topic(self, topic: str) -> str | None:
         prefix = f"{self._settings.topic_prefix}/"
@@ -300,6 +347,14 @@ class Agent:
                 self._buffer.state(serial, now) == buf.ESTADO_INACTIVO
             ):
                 self._send_heartbeat(serial, now)
+
+
+def _json_object(payload: bytes) -> dict[str, Any] | None:
+    try:
+        data = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _advance(previous: float, period: float, now: float) -> float:

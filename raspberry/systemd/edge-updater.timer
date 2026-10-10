@@ -1,0 +1,16 @@
+# SGPMP — cada cuánto se buscan releases nuevos del edge_agent.
+# Instalado por scripts/install.sh; no editar en el equipo (se sobreescribe).
+# Próxima ejecución: systemctl list-timers edge-updater.timer
+
+[Unit]
+Description=SGPMP edge_agent: buscar releases nuevos cada 3 horas
+
+[Timer]
+OnCalendar=*-*-* 00/3:00:00
+# Que no se actualicen todas las Raspberry en el mismo minuto.
+RandomizedDelaySec=30min
+# Si estaba apagada a la hora programada, corre al encender.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

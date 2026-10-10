@@ -48,7 +48,7 @@ def test_ack_se_guarda_si_no_hay_conexion_y_sale_al_reconectar(tmp_path):
     h.link.connected = True
     h.agent.handle_event(Connected(session_present=True), h.now)
     acks = h.link.on("status")
-    assert [a["comando_id"] for a in acks] == ["c-1"]
+    assert [a["id_comando"] for a in acks] == ["c-1"]
     h.buffer.close()
 
 
@@ -144,7 +144,7 @@ def test_config_sobrevive_reinicio_del_agente(tmp_path):
     assert h2.store.get(SERIAL).comando_id == "c-9"
     # El ACK sin PUBACK de la corrida anterior se reenvía.
     h2.agent.handle_event(Connected(session_present=False), h2.now)
-    assert [a["comando_id"] for a in h2.link.on("status")] == ["c-9"]
+    assert [a["id_comando"] for a in h2.link.on("status")] == ["c-9"]
     h2.buffer.close()
 
 
@@ -192,7 +192,9 @@ def test_config_se_propaga_a_la_fuente_al_arrancar_y_con_cada_comando(tmp_path):
 
     h = Harness(tmp_path)
     source = StubSource()
-    agent = Agent(h.settings, h.link, h.store, h.buffer, source, clock=lambda: h.now)
+    agent = Agent(
+        h.settings, h.link, h.store, h.buffer, source, umbrales=h.umbrales, clock=lambda: h.now
+    )
     assert source.applied == [(SERIAL, 10)]
 
     agent.handle_event(
@@ -200,3 +202,17 @@ def test_config_se_propaga_a_la_fuente_al_arrancar_y_con_cada_comando(tmp_path):
     )
     assert source.applied[-1] == (SERIAL, 5)
     h.buffer.close()
+
+
+def test_comando_vencido_del_broker_responde_error_sin_aplicar(harness):
+    # El agente le pasa a handle_command su reloj (sincronizado en el harness).
+    from datetime import UTC, datetime
+
+    viejo = datetime.fromtimestamp(harness.now - 3600, UTC).isoformat()
+    command(
+        harness, id_comando="abc", emitido_en=viejo, frecuencia_captura=5, intervalo_transmision=30
+    )
+
+    (ack,) = harness.link.on("status")
+    assert ack["resultado"] == "ERROR" and ack["id_comando"] == "abc"
+    assert harness.store.get(SERIAL).frecuencia_captura_min != 5

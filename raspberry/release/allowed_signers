@@ -1,0 +1,9 @@
+# Claves SSH autorizadas para firmar los releases (tags vX.Y.Z) del edge_agent.
+# Solo se usa con EDGE_UPDATE_REQUIRE_SIGNATURE=1 en /etc/sgpmp/edge-updater.env
+# (por defecto 0). install.sh lo copia a /etc/sgpmp/allowed_signers.
+#
+# Formato, una línea por clave (pública, nunca la privada):
+#   <identificador> namespaces="git" ssh-ed25519 AAAA... comentario
+#
+# Con la firma activada y este archivo sin claves, no se instala ningún
+# release. Cómo activarla: docs/RELEASES.md §5
