@@ -13,8 +13,8 @@ jobs:
       run:
         working-directory: raspberry
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           # Raspberry Pi OS bookworm trae Python 3.11.
           python-version: "3.11"
@@ -37,11 +37,11 @@ jobs:
       run:
         working-directory: esp32
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.platformio
           key: pio-${{ hashFiles('esp32/platformio.ini') }}
@@ -72,11 +72,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           [ -n "$GH_TOKEN" ] || { echo "::error::Falta el secret GH_TOKEN (docs/RELEASES.md §1)"; exit 1; }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_TOKEN }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
       # Versiones mayores fijas: sin fijar, npm trae combinaciones que no
