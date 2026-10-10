@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sgpmp-edge-agent"
-version = "0.1.0"
+version = "0.1.1"
 description = "SGPMP - edge_agent de la Raspberry: gateway LoRa <-> MQTT con enlace persistente al broker"
 readme = "README.md"
 requires-python = ">=3.11"
