@@ -77,6 +77,9 @@ def handle_command(
     if _is_older(config_version, current.config_version):
         return CommandResult(_ack("OK", comando_id, current.config_version), current, False)
 
+    if "fps" in data:
+        return _handle_fps(data, current, comando_id, config_version)
+
     frecuencia = data.get("frecuencia_captura")
     intervalo = data.get("intervalo_transmision")
     heartbeat = data.get("intervalo_heartbeat")
@@ -95,6 +98,19 @@ def handle_command(
         comando_id=comando_id,
         config_version=config_version,
     )
+    return CommandResult(_ack("OK", comando_id, config_version), new, new != current)
+
+
+def _handle_fps(
+    data: dict[str, Any], current: DeviceConfig, comando_id: Any, config_version: Any
+) -> CommandResult:
+    """Configuración de una cámara (RF-23 v1.1): solo `fps`, sin tiempos de sensor."""
+    fps = data["fps"]
+    if "frecuencia_captura" in data or "intervalo_transmision" in data:
+        return _error(current, comando_id, "una cámara solo recibe fps, no frecuencia ni intervalo")
+    if not (_is_int(fps) and 1 <= fps <= 60):
+        return _error(current, comando_id, "fps debe ser un entero entre 1 y 60")
+    new = replace(current, fps=fps, comando_id=comando_id, config_version=config_version)
     return CommandResult(_ack("OK", comando_id, config_version), new, new != current)
 
 

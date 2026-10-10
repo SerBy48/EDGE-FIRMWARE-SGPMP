@@ -28,6 +28,9 @@ class DeviceConfig:
     intervalo_heartbeat_min: float | None = None
     comando_id: str | int | None = None
     config_version: str | int | None = None
+    # Cámaras (RF-23 v1.1): cuadros por segundo de captura, 1-60. Las cámaras no
+    # usan frecuencia/intervalo; quedan con sus defaults.
+    fps: int | None = None
 
 
 @dataclass(frozen=True)
