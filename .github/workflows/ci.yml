@@ -50,3 +50,67 @@ jobs:
         run: pio test -e native
       - name: Compilación
         run: pio run -e esp32dev
+
+  # Versionamiento automático (release.config.cjs, docs/RELEASES.md): solo
+  # con el CI en verde. Un tag final en main se instala en todas las Pi.
+  release:
+    name: Versionamiento
+    needs: [raspberry, esp32]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency: release
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      # main y develop tienen ruleset con PR obligatorio: el token de Actions
+      # no puede empujar el commit de release ni el merge a develop. Hace
+      # falta un PAT de una cuenta en el bypass, en el secret GH_TOKEN.
+      - name: Verificar GH_TOKEN
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "::error::Falta el secret GH_TOKEN (docs/RELEASES.md §1)"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Versiones mayores fijas: sin fijar, npm trae combinaciones que no
+      # funcionan juntas (el preset 10 no corre con el writer de semantic-release 25).
+      - name: Instalar semantic-release
+        run: |
+          npm install --no-save \
+            semantic-release@25 \
+            @semantic-release/commit-analyzer@13 \
+            @semantic-release/release-notes-generator@14 \
+            @semantic-release/changelog@7 \
+            @semantic-release/exec@7 \
+            @semantic-release/git@11 \
+            @semantic-release/github@12 \
+            conventional-changelog-conventionalcommits@9
+      - name: Publicar versión
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: npx semantic-release
+      # Sin esto develop no ve el tag de main y sigue sacando rc de la
+      # versión ya publicada (lo que pasó en el broker).
+      - name: Llevar el release de main a develop
+        if: github.ref_name == 'main'
+        run: |
+          git fetch origin main develop --tags
+          if ! git tag --points-at origin/main | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Sin release nuevo en main, no hay nada que llevar a develop"
+            exit 0
+          fi
+          git config user.name "semantic-release-bot"
+          git config user.email "semantic-release-bot@users.noreply.github.com"
+          git checkout -B develop origin/develop
+          git merge --no-ff origin/main -m "chore: llevar el release de main a develop [skip ci]" || {
+            echo "::error::Conflicto al fusionar main en develop: hacerlo por PR (docs/RELEASES.md §3)"
+            exit 1
+          }
+          git push origin develop
