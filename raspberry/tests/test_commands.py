@@ -138,3 +138,20 @@ def test_emitido_en_sin_zona_horaria_no_se_puede_juzgar():
         intervalo_transmision=30,
     )
     assert con_reloj(raw).changed
+
+
+def test_camara_aplica_solo_fps():
+    r = handle_command(cmd(fps=15, id_comando="c-9"), CURRENT)
+    assert r.ack["resultado"] == "OK"
+    assert r.ack["id_comando"] == "c-9"
+    assert r.changed
+    assert r.config.fps == 15
+    # los tiempos de sensor no se tocan
+    assert (r.config.frecuencia_captura_min, r.config.intervalo_transmision_min) == (10, 15)
+
+
+def test_camara_rechaza_fps_fuera_de_rango_o_mezclado():
+    for fields in ({"fps": 0}, {"fps": 61}, {"fps": "15"}, {"fps": 15, "frecuencia_captura": 5}):
+        r = handle_command(cmd(**fields), CURRENT)
+        assert r.ack["resultado"] == "ERROR", fields
+        assert not r.changed
