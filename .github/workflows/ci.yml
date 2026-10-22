@@ -31,7 +31,7 @@ jobs:
         run: sudo -E bash tests/updater/test_update.sh
 
   esp32:
-    name: Firmware ESP32
+    name: Firmware nodo sensor
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -48,8 +48,8 @@ jobs:
       - run: pip install platformio
       - name: Tests del protocolo (vectores compartidos con Python)
         run: pio test -e native
-      - name: Compilación
-        run: pio run -e esp32dev
+      - name: Compilación (ESP8266 y ESP32)
+        run: pio run -e nodemcuv2 -e esp32dev
 
   # Versionamiento automático (release.config.cjs, docs/RELEASES.md): solo
   # con el CI en verde. Un tag final en main se instala en todas las Pi.

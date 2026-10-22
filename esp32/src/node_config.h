@@ -1,5 +1,6 @@
-// Config del nodo persistida en NVS: sobrevive cortes de energía (la memoria
-// RTC solo sobrevive al deep sleep).
+// Config del nodo persistida en flash (NVS en el ESP32, EEPROM emulada en el
+// ESP8266): sobrevive cortes de energía (la memoria RTC solo sobrevive al
+// deep sleep).
 #pragma once
 
 #include <stdint.h>
