@@ -56,6 +56,7 @@ class _Node:
     snr_db: float | None = None
     bateria_pct: int | None = None
     reported: tuple[int, int] | None = None  # (frecuencia, intervalo) del último ESTADO
+    sensores: tuple[int, int] | None = None  # (detectados, fallando) del último ESTADO
     downlink_seq: int = 0
     desired: _Desired | None = None
 
@@ -192,6 +193,7 @@ class LoraGateway:
                         message.fw_major,
                         message.fw_minor,
                     )
+                self._track_sensores(node, message)
                 desired = node.desired
                 if desired is not None and not desired.matches(*node.reported):
                     return p.ConfigDownlink(
@@ -216,6 +218,23 @@ class LoraGateway:
             case _:
                 logger.info("Nodo 0x%04x envió un tipo solo-downlink: %s", node.node_id, message)
         return None
+
+    def _track_sensores(self, node: _Node, message: p.Estado) -> None:
+        """Registra en el log solo los cambios: un sensor que aparece, se desconecta o falla."""
+        if message.sensores_detectados is None:
+            return  # firmware anterior: no informa sensores
+        sensores = (message.sensores_detectados, message.sensores_fallando or 0)
+        if sensores == node.sensores:
+            return
+        node.sensores = sensores
+        detectados, fallando = sensores
+        log = logger.warning if fallando else logger.info
+        log(
+            "Nodo 0x%04x sensores detectados: %s; fallando: %s",
+            node.node_id,
+            p.Sensor.describe(detectados),
+            p.Sensor.describe(fallando),
+        )
 
     def _store_telemetry(
         self, node: _Node, frame: p.Frame, message: p.Telemetria, now: float

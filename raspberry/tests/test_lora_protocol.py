@@ -12,6 +12,7 @@ from edge_agent.lora.protocol import (
     Measurement,
     MsgType,
     ResultadoConfig,
+    Sensor,
     Telemetria,
     build,
     crc16_ccitt,
@@ -33,6 +34,21 @@ VECTORS = {
         "012a01020209ff0000000a000f000100b4f5",
         9,
         Estado(None, 0, 10, 15, 0, 1, 0),
+    ),
+    "estado_sensores": (
+        "012a0102020b570305000a000f0102020b0221c3",
+        11,
+        Estado(
+            87,
+            0x0305,
+            10,
+            15,
+            1,
+            2,
+            FlagsEstado.ERROR_SENSOR,
+            Sensor.DHT22 | Sensor.DS18B20 | Sensor.MAX30102,
+            Sensor.DS18B20,
+        ),
     ),
     "ack_config": ("012a0102030a0306005feb", 10, AckConfig(0x0306, ResultadoConfig.OK)),
     "config": ("012a0102040303060005001e4a6c", 3, ConfigDownlink(0x0306, 5, 30)),
@@ -90,6 +106,27 @@ def test_telemetria_con_largo_incoherente():
     payload = bytes.fromhex("005a02") + bytes(5)  # dice 2 mediciones, trae 1
     with pytest.raises(FrameError):
         parse(encode_frame(Frame(1, 2, MsgType.TELEMETRIA, 0, payload)))
+
+
+@pytest.mark.parametrize("extra", [b"\x01", b"\x01\x02\x03"])
+def test_estado_con_largo_invalido(extra):
+    from edge_agent.lora.protocol import Frame, encode_frame
+
+    payload = bytes.fromhex(VECTORS["estado"][0])[6:-2] + extra  # 10 B + basura
+    with pytest.raises(FrameError, match="ESTADO"):
+        parse(encode_frame(Frame(1, 2, MsgType.ESTADO, 0, payload)))
+
+
+def test_estado_sin_sensores_es_el_formato_anterior():
+    # Un nodo con firmware anterior manda 10 B: sigue siendo válido.
+    _, estado = parse(bytes.fromhex(VECTORS["estado"][0]))
+    assert estado.sensores_detectados is None and estado.sensores_fallando is None
+
+
+def test_describe_sensores():
+    assert Sensor.describe(Sensor.DHT22 | Sensor.MPU6050) == "DHT22, MPU6050"
+    assert Sensor.describe(0) == "ninguno"
+    assert Sensor.describe(0x80) == "0x80"
 
 
 def test_maximo_de_mediciones_cabe_en_una_trama():

@@ -19,7 +19,7 @@
 
 namespace {
 
-constexpr uint32_t kRtcMagic = 0x53475032;  // "SGP2"
+constexpr uint32_t kRtcMagic = 0x53475033;  // "SGP3": cambia si cambia RtcState
 
 struct Sample {
   uint32_t captured_s;
@@ -97,6 +97,29 @@ void send(const uint8_t* frame, size_t len) {
   LoRa.endPacket();  // bloquea hasta TxDone
 }
 
+// Una captura en una o más TELEMETRIA con el mismo `age_s`: con todo el
+// catálogo conectado hay más variables de las que caben en una trama.
+void send_reading(const SensorReading& r, uint16_t age_s, uint8_t* frame) {
+  sgpmp::Measurement ms[sgpmp::MAX_MEASUREMENTS];
+  size_t count = 0;
+  for (uint8_t v = 0; v < VAR_COUNT; ++v) {
+    const SensorVar var = static_cast<SensorVar>(v);
+    if (!r.has(var)) {
+      continue;
+    }
+    ms[count++] = {sensor_var_code(var), r.values[v]};
+    if (count == sgpmp::MAX_MEASUREMENTS) {
+      send(frame, sgpmp::encode_telemetria(next_header(), age_s, ms, count, frame,
+                                           sgpmp::MAX_FRAME_LEN));
+      count = 0;
+    }
+  }
+  if (count > 0) {
+    send(frame,
+         sgpmp::encode_telemetria(next_header(), age_s, ms, count, frame, sgpmp::MAX_FRAME_LEN));
+  }
+}
+
 // Espera un CONFIG dirigido a este nodo durante la ventana RX.
 bool receive_config(sgpmp::ConfigDownlink& out, uint32_t window_ms) {
   const uint32_t deadline = millis() + window_ms;
@@ -149,21 +172,25 @@ void transmit_burst(NodeConfig& cfg, uint32_t now) {
   uint8_t flags = rtc.reboot_pending ? sgpmp::FLAG_REINICIO : 0;
   for (uint8_t i = 0; i < rtc.n_samples; ++i) {
     const Sample& s = rtc.samples[i];
-    if (s.reading.error) {
+    if (s.reading.failing) {
       flags |= sgpmp::FLAG_ERROR_SENSOR;
     }
-    if (s.reading.count == 0) {
-      continue;  // todos los sensores fallaron: solo queda el flag
-    }
     const uint32_t age = now - s.captured_s;
-    send(frame, sgpmp::encode_telemetria(next_header(), age > 0xFFFF ? 0xFFFF : age,
-                                         s.reading.m, s.reading.count, frame, sizeof(frame)));
+    send_reading(s.reading, age > 0xFFFF ? 0xFFFF : age, frame);
   }
 
-  const sgpmp::Estado estado{battery_percent(),         cfg.cfg_version,
-                             cfg.frecuencia_captura_min, cfg.intervalo_transmision_min,
-                             FW_MAJOR,                   FW_MINOR,
-                             flags};
+  // Los sensores del ESTADO son los de la captura más reciente: el estado actual.
+  const SensorReading& last = rtc.samples[rtc.n_samples - 1].reading;
+  const sgpmp::Estado estado{battery_percent(),
+                             cfg.cfg_version,
+                             cfg.frecuencia_captura_min,
+                             cfg.intervalo_transmision_min,
+                             FW_MAJOR,
+                             FW_MINOR,
+                             flags,
+                             true,
+                             last.detected,
+                             last.failing};
   send(frame, sgpmp::encode_estado(next_header(), estado, frame, sizeof(frame)));
   Serial.printf("[lora] ráfaga: %u capturas + ESTADO\n", rtc.n_samples);
 

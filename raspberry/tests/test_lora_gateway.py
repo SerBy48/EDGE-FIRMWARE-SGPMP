@@ -122,6 +122,22 @@ def test_config_igual_no_genera_downlink(env):
     assert env.downlinks() == []
 
 
+def test_sensores_se_registran_solo_al_cambiar(env, caplog):
+    caplog.set_level("INFO", logger="edge_agent.lora.gateway")
+    con_sensores = p.Estado(80, 0, 10, 15, 1, 0, 0, p.Sensor.DHT22 | p.Sensor.DS18B20, 0)
+    env.rx(1, 1, con_sensores)
+    env.rx(1, 2, con_sensores)  # sin cambios: no se repite
+    falla = p.Estado(80, 0, 10, 15, 1, 0, 0, p.Sensor.DHT22 | p.Sensor.DS18B20, p.Sensor.DS18B20)
+    env.rx(1, 3, falla)
+    env.rx(1, 4, estado())  # firmware anterior: no borra lo último conocido
+
+    logs = [(r.levelname, r.getMessage()) for r in caplog.records if "sensores" in r.getMessage()]
+    assert logs == [
+        ("INFO", "Nodo 0x0001 sensores detectados: DHT22, DS18B20; fallando: ninguno"),
+        ("WARNING", "Nodo 0x0001 sensores detectados: DHT22, DS18B20; fallando: DS18B20"),
+    ]
+
+
 def test_serial_por_sitio_propaga_a_todos_los_nodos():
     env = Env(nodes={1: "IOT-SITIO", 2: "IOT-SITIO"})
     env.gw.apply_config("IOT-SITIO", DeviceConfig(5, 30))

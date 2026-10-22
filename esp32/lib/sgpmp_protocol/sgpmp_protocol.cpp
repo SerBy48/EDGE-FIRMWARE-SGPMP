@@ -78,7 +78,7 @@ size_t encode_telemetria(const Header& h, uint16_t age_s, const Measurement* ms,
 }
 
 size_t encode_estado(const Header& h, const Estado& e, uint8_t* out, size_t out_len) {
-  uint8_t payload[10];
+  uint8_t payload[12];
   payload[0] = e.bateria_pct;
   put_u16(payload + 1, e.cfg_version);
   put_u16(payload + 3, e.frecuencia_captura_min);
@@ -86,7 +86,10 @@ size_t encode_estado(const Header& h, const Estado& e, uint8_t* out, size_t out_
   payload[7] = e.fw_major;
   payload[8] = e.fw_minor;
   payload[9] = e.flags;
-  return encode_frame(with_type(h, ESTADO), payload, sizeof(payload), out, out_len);
+  payload[10] = e.sensores_detectados;
+  payload[11] = e.sensores_fallando;
+  const size_t len = e.con_sensores ? 12 : 10;
+  return encode_frame(with_type(h, ESTADO), payload, len, out, out_len);
 }
 
 size_t encode_ack_config(const Header& h, const AckConfig& a, uint8_t* out, size_t out_len) {

@@ -60,6 +60,15 @@ void test_estado_sin_bateria() {
   assert_frame("012a01020209ff0000000a000f000100b4f5", out, len);
 }
 
+void test_estado_sensores() {
+  Estado e{87,    0x0305, 10, 15, 1, 2, FLAG_ERROR_SENSOR,
+           true,  SENSOR_BIT_DHT22 | SENSOR_BIT_DS18B20 | SENSOR_BIT_MAX30102,
+           SENSOR_BIT_DS18B20};
+  uint8_t out[MAX_FRAME_LEN];
+  size_t len = encode_estado(header(11), e, out, sizeof(out));
+  assert_frame("012a0102020b570305000a000f0102020b0221c3", out, len);
+}
+
 void test_ack_config() {
   uint8_t out[MAX_FRAME_LEN];
   size_t len = encode_ack_config(header(10), AckConfig{0x0306, RESULTADO_OK}, out, sizeof(out));
@@ -114,6 +123,7 @@ int main() {
   RUN_TEST(test_telemetria);
   RUN_TEST(test_estado);
   RUN_TEST(test_estado_sin_bateria);
+  RUN_TEST(test_estado_sensores);
   RUN_TEST(test_ack_config);
   RUN_TEST(test_decode_config);
   RUN_TEST(test_crc_corrupto);

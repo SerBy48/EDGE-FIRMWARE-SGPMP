@@ -38,6 +38,14 @@ enum FlagsEstado : uint8_t {
   FLAG_ERROR_SENSOR = 0x02,
 };
 
+// Bits de sensores_detectados / sensores_fallando del ESTADO.
+enum SensorBit : uint8_t {
+  SENSOR_BIT_DHT22 = 0x01,
+  SENSOR_BIT_DS18B20 = 0x02,
+  SENSOR_BIT_MPU6050 = 0x04,
+  SENSOR_BIT_MAX30102 = 0x08,
+};
+
 struct Header {
   uint8_t net_id;
   uint16_t node_id;
@@ -58,6 +66,10 @@ struct Estado {
   uint8_t fw_major;
   uint8_t fw_minor;
   uint8_t flags;
+  // Opcional: sin con_sensores se codifica el ESTADO de 10 B anterior.
+  bool con_sensores;
+  uint8_t sensores_detectados;  // bits de SensorBit
+  uint8_t sensores_fallando;
 };
 
 struct AckConfig {

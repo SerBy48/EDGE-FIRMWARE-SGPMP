@@ -2,7 +2,9 @@
 
 La misma codificación está en C++ en esp32/lib/sgpmp_protocol; ambos lados
 se prueban contra los mismos vectores (sección 9 del documento). Cualquier
-cambio acá debe replicarse allá y subir PROTOCOL_VERSION.
+cambio acá debe replicarse allá. Un cambio incompatible sube
+PROTOCOL_VERSION; un campo opcional al final de un payload (como los
+sensores del ESTADO) no.
 
 Trama: ver(1) net_id(1) node_id(2) msg_type(1) seq(1) payload(N) crc16(2)
 Todos los enteros en big-endian; floats IEEE-754 de 32 bits big-endian.
@@ -42,6 +44,25 @@ class FlagsEstado:
     ERROR_SENSOR = 0x02  # alguna lectura falló en el ciclo
 
 
+class Sensor:
+    """Bits de `sensores_detectados` / `sensores_fallando` del ESTADO."""
+
+    DHT22 = 0x01
+    DS18B20 = 0x02
+    MPU6050 = 0x04
+    MAX30102 = 0x08
+
+    NOMBRES = {DHT22: "DHT22", DS18B20: "DS18B20", MPU6050: "MPU6050", MAX30102: "MAX30102"}
+
+    @classmethod
+    def describe(cls, mask: int) -> str:
+        names = [name for bit, name in cls.NOMBRES.items() if mask & bit]
+        unknown = mask & ~sum(cls.NOMBRES)
+        if unknown:
+            names.append(f"0x{unknown:02x}")
+        return ", ".join(names) or "ninguno"
+
+
 class FrameError(ValueError):
     """Trama inválida: se descarta sin afectar al resto del gateway."""
 
@@ -76,6 +97,13 @@ class Estado:
     fw_major: int
     fw_minor: int
     flags: int
+    # Opcionales (bits de `Sensor`): None en nodos con firmware anterior.
+    sensores_detectados: int | None = None
+    sensores_fallando: int | None = None
+
+
+ESTADO_LEN = 10
+ESTADO_CON_SENSORES_LEN = 12
 
 
 @dataclass(frozen=True)
@@ -146,7 +174,7 @@ def encode_message(message: Message) -> tuple[MsgType, bytes]:
             return MsgType.TELEMETRIA, payload
         case Estado():
             bateria = BATERIA_DESCONOCIDA if message.bateria_pct is None else message.bateria_pct
-            return MsgType.ESTADO, struct.pack(
+            payload = struct.pack(
                 ">BHHHBBB",
                 bateria,
                 message.cfg_version,
@@ -156,6 +184,11 @@ def encode_message(message: Message) -> tuple[MsgType, bytes]:
                 message.fw_minor,
                 message.flags,
             )
+            if message.sensores_detectados is not None:
+                payload += struct.pack(
+                    ">BB", message.sensores_detectados, message.sensores_fallando or 0
+                )
+            return MsgType.ESTADO, payload
         case AckConfig():
             return MsgType.ACK_CONFIG, struct.pack(">HB", message.cfg_version, message.resultado)
         case ConfigDownlink():
@@ -181,7 +214,14 @@ def decode_message(msg_type: int, payload: bytes) -> Message:
                 )
                 return Telemetria(age, ms)
             case MsgType.ESTADO:
-                bat, ver, frec, interv, major, minor, flags = struct.unpack(">BHHHBBB", payload)
+                if len(payload) not in (ESTADO_LEN, ESTADO_CON_SENSORES_LEN):
+                    raise FrameError(f"ESTADO de {len(payload)} B (se esperan 10 o 12)")
+                bat, ver, frec, interv, major, minor, flags = struct.unpack(
+                    ">BHHHBBB", payload[:ESTADO_LEN]
+                )
+                detectados = fallando = None
+                if len(payload) == ESTADO_CON_SENSORES_LEN:
+                    detectados, fallando = payload[ESTADO_LEN], payload[ESTADO_LEN + 1]
                 return Estado(
                     None if bat == BATERIA_DESCONOCIDA else bat,
                     ver,
@@ -190,6 +230,8 @@ def decode_message(msg_type: int, payload: bytes) -> Message:
                     major,
                     minor,
                     flags,
+                    detectados,
+                    fallando,
                 )
             case MsgType.ACK_CONFIG:
                 ver, resultado = struct.unpack(">HB", payload)

@@ -68,7 +68,7 @@ Los dos lados deben usar exactamente los mismos parámetros de radio.
 | `msg_type` | Nombre | Sentido | Payload |
 |---|---|---|---|
 | `0x01` | TELEMETRIA | ESP32 → RPi | `age_s` u16 · `count` u8 · `count` × (`code` u8 · `valor` f32). Máximo 8 mediciones |
-| `0x02` | ESTADO | ESP32 → RPi | `bateria_pct` u8 (`0xFF` = desconocida) · `cfg_version` u16 · `frecuencia_captura_min` u16 · `intervalo_transmision_min` u16 · `fw_major` u8 · `fw_minor` u8 · `flags` u8 |
+| `0x02` | ESTADO | ESP32 → RPi | `bateria_pct` u8 (`0xFF` = desconocida) · `cfg_version` u16 · `frecuencia_captura_min` u16 · `intervalo_transmision_min` u16 · `fw_major` u8 · `fw_minor` u8 · `flags` u8 · *opcional:* `sensores_detectados` u8 · `sensores_fallando` u8 |
 | `0x03` | ACK_CONFIG | ESP32 → RPi | `cfg_version` u16 · `resultado` u8 (`0` OK, `1` inválida) |
 | `0x04` | CONFIG | RPi → ESP32 | `cfg_version` u16 · `frecuencia_captura_min` u16 · `intervalo_transmision_min` u16 |
 
@@ -77,6 +77,14 @@ Los dos lados deben usar exactamente los mismos parámetros de radio.
   `timestamp_captura = hora_recepción − age_s` con su reloj NTP.
 - `flags` de ESTADO: bit0 = primer ESTADO tras encendido/reset, bit1 = falló
   alguna lectura de sensor en el ciclo.
+- `sensores_detectados` / `sensores_fallando` de ESTADO: catálogo de sensores
+  de la captura más reciente. bit0 = DHT22, bit1 = DS18B20, bit2 = MPU6050,
+  bit3 = MAX30102. Un sensor no detectado no envía variables. Son opcionales:
+  un ESTADO de 10 B (firmware anterior) sigue siendo válido, por eso no cambia
+  `ver`. Una Raspberry anterior a este campo rechaza el ESTADO de 12 B, así
+  que **se actualiza la Raspberry antes que los nodos**.
+- Una captura con más de 8 variables (todo el catálogo conectado) viaja en
+  varias TELEMETRIA con el mismo `age_s`.
 
 ## 6. Ciclo del nodo y ventana de downlink
 
@@ -128,6 +136,7 @@ Python y en C++.
 | telemetria | 7 | age 90 s; (1, 23.5), (2, −4.25) | `012a01020107005a020141bc000002c08800005494` |
 | estado | 8 | bat 87 %, ver 0x0305, 10/15 min, fw 1.2, REINICIO | `012a01020208570305000a000f010201ec76` |
 | estado_sin_bateria | 9 | bat desconocida, ver 0, 10/15 min, fw 0.1 | `012a01020209ff0000000a000f000100b4f5` |
+| estado_sensores | 11 | bat 87 %, ver 0x0305, 10/15 min, fw 1.2, ERROR_SENSOR; detectados DHT22+DS18B20+MAX30102, fallando DS18B20 | `012a0102020b570305000a000f0102020b0221c3` |
 | ack_config | 10 | ver 0x0306, OK | `012a0102030a0306005feb` |
 | config | 3 | ver 0x0306, 5/30 min | `012a0102040303060005001e4a6c` |
 
@@ -138,7 +147,7 @@ Python y en C++.
 2. Sin autenticación: cualquiera en alcance con los parámetros de radio
    puede inyectar tramas con un `node_id` válido. Propuesta v2: MIC
    AES-CMAC de 4 B con clave por nodo.
-3. Tabla de `code` de variables definitiva, junto al equipo que eligió los
-   sensores.
+3. Nombres en la BD de los `code` 1–9 del catálogo actual
+   (`esp32/README.md`, "Codes de variable").
 4. Duty cycle / canales: v1 usa un solo canal fijo. Evaluar salto de
    frecuencia si la regulación lo exige para la potencia elegida.
