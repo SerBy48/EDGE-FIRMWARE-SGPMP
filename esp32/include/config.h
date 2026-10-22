@@ -33,6 +33,11 @@
 #ifndef LORA_SYNC_WORD
 #define LORA_SYNC_WORD 0x12
 #endif
+// Reloj SPI del SX1276. La librería usa 8 MHz por defecto, que falla con
+// cables dupont; para tramas de 51 bytes 1 MHz no cambia el tiempo despierto.
+#ifndef LORA_SPI_HZ
+#define LORA_SPI_HZ 1000000
+#endif
 #ifndef LORA_RX_WINDOW_MS
 #define LORA_RX_WINDOW_MS 1500
 #endif

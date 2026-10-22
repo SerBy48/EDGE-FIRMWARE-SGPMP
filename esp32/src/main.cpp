@@ -51,11 +51,30 @@ sgpmp::Header next_header() {
   return sgpmp::Header{NET_ID, NODE_ID, 0, rtc.seq++};
 }
 
+// LoRa.begin() solo devuelve false: se relee RegVersion para que el log
+// diga qué revisar, igual que raspberry/scripts/lora_check.py.
+void report_radio_failure() {
+  constexpr uint8_t kRegVersion = 0x42;
+  SPI.beginTransaction(SPISettings(LORA_SPI_HZ, MSBFIRST, SPI_MODE0));
+  digitalWrite(PIN_LORA_SS, LOW);
+  SPI.transfer(kRegVersion);
+  const uint8_t version = SPI.transfer(0x00);
+  digitalWrite(PIN_LORA_SS, HIGH);
+  SPI.endTransaction();
+  const char* hint = version == 0x00   ? "sin alimentación (VCC 3.3 V y GND), MISO o NSS mal cableados"
+                     : version == 0xFF ? "MISO al aire o sin alimentación (3.3 V y GND)"
+                                       : "SCK/MOSI cruzados o cables flojos";
+  Serial.printf("[lora] el SX1276 no responde (RegVersion=0x%02x, esperado 0x12): %s\n", version,
+                hint);
+}
+
 bool radio_begin() {
   platform_spi_begin();
   LoRa.setSPI(SPI);
+  LoRa.setSPIFrequency(LORA_SPI_HZ);
   LoRa.setPins(PIN_LORA_SS, PIN_LORA_RST, PIN_LORA_DIO0);
   if (!LoRa.begin(LORA_FREQ_HZ)) {
+    report_radio_failure();
     return false;
   }
   LoRa.setSpreadingFactor(LORA_SF);
@@ -123,7 +142,6 @@ void capture(uint32_t now) {
 void transmit_burst(NodeConfig& cfg, uint32_t now) {
   if (!radio_begin()) {
     // Las capturas se conservan y se reintentan en el próximo ciclo.
-    Serial.println("[lora] el SX1276 no responde");
     return;
   }
 
