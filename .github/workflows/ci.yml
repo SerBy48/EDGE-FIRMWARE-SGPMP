@@ -48,8 +48,12 @@ jobs:
       - run: pip install platformio
       - name: Tests del protocolo (vectores compartidos con Python)
         run: pio test -e native
-      - name: Compilación (ESP8266 y ESP32)
-        run: pio run -e nodemcuv2 -e esp32dev
+      # El ESP32 va primero: si espressif8266 se instala antes, espressif32
+      # queda sin el módulo intelhex de su esptool y falla al generar el .bin.
+      - name: Compilación ESP32
+        run: pio run -e esp32dev
+      - name: Compilación ESP8266
+        run: pio run -e nodemcuv2
 
   # Versionamiento automático (release.config.cjs, docs/RELEASES.md): solo
   # con el CI en verde. Un tag final en main se instala en todas las Pi.
