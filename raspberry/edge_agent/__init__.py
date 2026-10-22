@@ -1,3 +1,3 @@
 """edge_agent: servicio de la Raspberry que conecta los ESP32 (LoRa) con el broker MQTT SGPMP."""
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
