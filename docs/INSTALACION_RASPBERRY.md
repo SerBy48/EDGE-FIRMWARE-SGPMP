@@ -320,9 +320,14 @@ EDGE_LORA_FREQ_HZ=<frecuencia confirmada, ej. 915000000>
 EDGE_LORA_TX_POWER_DBM=<potencia confirmada>
 EDGE_LORA_NET_ID=0x01
 EDGE_LORA_NODES=1=TC-M09-G64-1789321890010
-EDGE_LORA_VARIABLES=1=temperatura_ambiente:C;2=humedad_relativa:%
+EDGE_LORA_VARIABLES=1=temperatura_ambiente:C;2=humedad_relativa:%;3=<variable del DS18B20>:C
 EDGE_LORA_RESET_GPIO=25
 ```
+
+Con el nodo actual (NodeMCU + DHT22 + DS18B20, `esp32/README.md`): `1` y
+`2` son la temperatura y la humedad del DHT22, y `3` la temperatura del
+DS18B20. `<variable del DS18B20>` debe ser el nombre con que esa variable
+existe en la BD.
 
 - `EDGE_LORA_NODES`: `node_id=serial` por cada ESP32, con el serial que se
   registró en la plataforma bajo este Gateway Edge. Todos van en

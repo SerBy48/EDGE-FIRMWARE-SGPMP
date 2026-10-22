@@ -1,6 +1,6 @@
-// Nodo sensor SGPMP: ESP32 + SX1276, a batería (Fase 1).
+// Nodo sensor SGPMP: ESP8266 o ESP32 + SX1276, a batería (Fase 1).
 //
-// Todo el trabajo ocurre en setup(): el ESP32 despierta del deep sleep cada
+// Todo el trabajo ocurre en setup(): el nodo despierta del deep sleep cada
 // frecuencia_captura, captura, y cada intervalo_transmision transmite una
 // ráfaga (TELEMETRIA por captura + ESTADO), abre la ventana RX para un
 // posible CONFIG y vuelve a dormir. Ver docs/PROTOCOLO_LORA.md §6.
@@ -9,18 +9,17 @@
 #include <Arduino.h>
 #include <LoRa.h>
 #include <SPI.h>
-#include <esp_sleep.h>
-#include <sys/time.h>
 
 #include "battery.h"
 #include "config.h"
 #include "node_config.h"
+#include "platform.h"
 #include "sensors.h"
 #include "sgpmp_protocol.h"
 
 namespace {
 
-constexpr uint32_t kRtcMagic = 0x53475031;  // "SGP1"
+constexpr uint32_t kRtcMagic = 0x53475032;  // "SGP2"
 
 struct Sample {
   uint32_t captured_s;
@@ -30,29 +29,30 @@ struct Sample {
 // Sobrevive al deep sleep (no a un corte de energía).
 struct RtcState {
   uint32_t magic;
-  uint8_t seq;
+  // Reloj del nodo en ms desde el encendido. millis() vuelve a 0 en cada
+  // despertar del ESP8266, así que se acumula aquí el tiempo dormido. No es
+  // hora real (el nodo no la necesita, ver `age_s`).
+  uint64_t clock_ms;
+  // Resto de un deep sleep más largo que platform_max_sleep_ms().
+  uint64_t sleep_pending_ms;
   uint32_t last_tx_s;
+  uint8_t seq;
   uint8_t n_samples;
   bool reboot_pending;
   Sample samples[MAX_SAMPLES];
 };
+static_assert(sizeof(RtcState) <= PLATFORM_RTC_MAX_LEN, "bajar MAX_SAMPLES");
 
-RTC_DATA_ATTR RtcState rtc;
+RtcState rtc;
 
-// Segundos desde el encendido. El reloj RTC del ESP32 sigue contando durante
-// el deep sleep; no es hora real (el nodo no la necesita, ver `age_s`).
-uint32_t uptime_s() {
-  timeval tv;
-  gettimeofday(&tv, nullptr);
-  return static_cast<uint32_t>(tv.tv_sec);
-}
+uint32_t uptime_s() { return static_cast<uint32_t>((rtc.clock_ms + millis()) / 1000); }
 
 sgpmp::Header next_header() {
   return sgpmp::Header{NET_ID, NODE_ID, 0, rtc.seq++};
 }
 
 bool radio_begin() {
-  SPI.begin(PIN_LORA_SCK, PIN_LORA_MISO, PIN_LORA_MOSI, PIN_LORA_SS);
+  platform_spi_begin();
   LoRa.setSPI(SPI);
   LoRa.setPins(PIN_LORA_SS, PIN_LORA_RST, PIN_LORA_DIO0);
   if (!LoRa.begin(LORA_FREQ_HZ)) {
@@ -85,6 +85,7 @@ bool receive_config(sgpmp::ConfigDownlink& out, uint32_t window_ms) {
   while (static_cast<int32_t>(deadline - millis()) > 0) {
     int size = LoRa.parsePacket();
     if (size <= 0) {
+      yield();  // el watchdog del ESP8266 reinicia si el loop no lo alimenta
       continue;
     }
     size_t len = 0;
@@ -133,6 +134,9 @@ void transmit_burst(NodeConfig& cfg, uint32_t now) {
     if (s.reading.error) {
       flags |= sgpmp::FLAG_ERROR_SENSOR;
     }
+    if (s.reading.count == 0) {
+      continue;  // todos los sensores fallaron: solo queda el flag
+    }
     const uint32_t age = now - s.captured_s;
     send(frame, sgpmp::encode_telemetria(next_header(), age > 0xFFFF ? 0xFFFF : age,
                                          s.reading.m, s.reading.count, frame, sizeof(frame)));
@@ -143,6 +147,7 @@ void transmit_burst(NodeConfig& cfg, uint32_t now) {
                              FW_MAJOR,                   FW_MINOR,
                              flags};
   send(frame, sgpmp::encode_estado(next_header(), estado, frame, sizeof(frame)));
+  Serial.printf("[lora] ráfaga: %u capturas + ESTADO\n", rtc.n_samples);
 
   rtc.n_samples = 0;
   rtc.reboot_pending = false;
@@ -165,31 +170,51 @@ void transmit_burst(NodeConfig& cfg, uint32_t now) {
   LoRa.sleep();
 }
 
-[[noreturn]] void deep_sleep(const NodeConfig& cfg) {
+// Duerme `ms` en tramos de a lo sumo platform_max_sleep_ms(): el ESP8266 no
+// llega a las 24 h que admite frecuencia_captura.
+[[noreturn]] void sleep_for(uint64_t ms) {
+  const uint64_t max_ms = platform_max_sleep_ms();
+  const uint64_t chunk = ms > max_ms ? max_ms : ms;
+  // Un resto menor a 1 s no justifica otro despertar.
+  rtc.sleep_pending_ms = ms - chunk > 1000 ? ms - chunk : 0;
+  rtc.clock_ms += millis() + chunk;
+  platform_rtc_save(&rtc, sizeof(rtc));
+  Serial.printf("[sleep] %lu s\n", static_cast<unsigned long>(chunk / 1000));
+  Serial.flush();
+  platform_deep_sleep(chunk);
+}
+
+[[noreturn]] void sleep_until_next_capture(const NodeConfig& cfg) {
   const uint64_t period_ms = static_cast<uint64_t>(cfg.frecuencia_captura_min) * 60000ULL;
   const uint64_t awake_ms = millis();
-  const uint64_t sleep_ms = period_ms > awake_ms + 1000 ? period_ms - awake_ms : 1000;
-  Serial.printf("[sleep] %llu s\n", sleep_ms / 1000);
-  Serial.flush();
-  esp_sleep_enable_timer_wakeup(sleep_ms * 1000ULL);
-  esp_deep_sleep_start();
+  sleep_for(period_ms > awake_ms + 1000 ? period_ms - awake_ms : 1000);
 }
 
 }  // namespace
 
 void setup() {
+  platform_begin();
   Serial.begin(115200);
-  const bool cold = esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER || rtc.magic != kRtcMagic;
+
+  bool cold = !platform_woke_from_sleep();
+  if (!cold) {
+    platform_rtc_load(&rtc, sizeof(rtc));
+    cold = rtc.magic != kRtcMagic;
+  }
   if (cold) {
     memset(&rtc, 0, sizeof(rtc));
     rtc.magic = kRtcMagic;
     rtc.reboot_pending = true;
+  } else if (rtc.sleep_pending_ms > millis() + 1000) {
+    // Tramo intermedio de un sleep largo: no hay captura todavía. Si falta
+    // menos de 1 s se captura ya (deepSleep(0) en el ESP8266 no despierta).
+    sleep_for(rtc.sleep_pending_ms - millis());
   }
-  Serial.printf("[boot] nodo 0x%04x fw %d.%d (%s)\n", NODE_ID, FW_MAJOR, FW_MINOR,
+  Serial.printf("\n[boot] nodo 0x%04x fw %d.%d (%s)\n", NODE_ID, FW_MAJOR, FW_MINOR,
                 cold ? "encendido" : "deep sleep");
 
   NodeConfig cfg = node_config_load();
-  sensors_begin();
+  sensors_begin(cold);
   const uint32_t now = uptime_s();
   capture(now);
 
@@ -200,7 +225,7 @@ void setup() {
   if (due) {
     transmit_burst(cfg, now);
   }
-  deep_sleep(cfg);
+  sleep_until_next_capture(cfg);
 }
 
 void loop() {}  // nunca se llega: setup() termina en deep sleep

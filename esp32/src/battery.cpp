@@ -11,7 +11,11 @@ uint8_t battery_percent() {
 #else
   uint32_t sum = 0;
   for (int i = 0; i < 8; ++i) {
+#if defined(ESP8266)
+    sum += static_cast<uint32_t>(analogRead(BATTERY_ADC_PIN)) * BATTERY_ADC_FULL_SCALE_MV / 1023;
+#else
     sum += analogReadMilliVolts(BATTERY_ADC_PIN);
+#endif
   }
   const float mv = (sum / 8.0f) * BATTERY_DIVIDER;
   const float pct = (mv - BATTERY_EMPTY_MV) * 100.0f / (BATTERY_FULL_MV - BATTERY_EMPTY_MV);
