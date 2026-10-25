@@ -17,6 +17,10 @@
 #error "SENSOR_SIMULADO usa los codes del DHT22: no combinarlos"
 #endif
 
+#define SENSORS_STR_(x) #x
+#define SENSORS_STR(x) SENSORS_STR_(x)
+#define I2C_WHERE "I2C SDA GPIO" SENSORS_STR(PIN_I2C_SDA) ", SCL GPIO" SENSORS_STR(PIN_I2C_SCL)
+
 namespace {
 
 constexpr uint8_t kCodes[VAR_COUNT] = {
@@ -45,8 +49,13 @@ String describe(uint8_t mask) {
   return s.length() ? s : String("ninguno");
 }
 
-[[maybe_unused]] void track(SensorReading& out, uint8_t bit, SensorStatus status) {
-  if (status != SensorStatus::AUSENTE) {
+// `where`: dónde se lo buscó, para que el log de un sensor no detectado diga
+// qué cable revisar.
+[[maybe_unused]] void track(SensorReading& out, uint8_t bit, SensorStatus status,
+                            const char* where) {
+  if (status == SensorStatus::AUSENTE) {
+    Serial.printf("[sensor] %s no detectado (%s)\n", describe(bit).c_str(), where);
+  } else {
     out.detected |= bit;
   }
   if (status == SensorStatus::FALLA) {
@@ -87,16 +96,16 @@ void sensors_read(SensorReading& out) {
   // Primero la ventana del MPU6050 (~2 s): cubre la conversión del DS18B20 y
   // el arranque del DHT22 tras un encendido.
 #if defined(SENSOR_MPU6050)
-  track(out, sgpmp::SENSOR_BIT_MPU6050, mpu6050_read(out));
+  track(out, sgpmp::SENSOR_BIT_MPU6050, mpu6050_read(out), I2C_WHERE " 0x68/0x69");
 #endif
 #if defined(SENSOR_DS18B20)
-  track(out, sgpmp::SENSOR_BIT_DS18B20, ds18b20_read(out));
+  track(out, sgpmp::SENSOR_BIT_DS18B20, ds18b20_read(out), "DATA en GPIO" SENSORS_STR(PIN_DS18B20));
 #endif
 #if defined(SENSOR_DHT22)
-  track(out, sgpmp::SENSOR_BIT_DHT22, dht22_read(out));
+  track(out, sgpmp::SENSOR_BIT_DHT22, dht22_read(out), "DATA en GPIO" SENSORS_STR(PIN_DHT22));
 #endif
 #if defined(SENSOR_MAX30102)
-  track(out, sgpmp::SENSOR_BIT_MAX30102, max30102_read(out));
+  track(out, sgpmp::SENSOR_BIT_MAX30102, max30102_read(out), I2C_WHERE " 0x57");
 #endif
 
 #if defined(SENSOR_SIMULADO)

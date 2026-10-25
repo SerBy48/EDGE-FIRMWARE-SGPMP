@@ -10,6 +10,17 @@
 #error "Definir NET_ID: debe coincidir con EDGE_LORA_NET_ID de la Raspberry"
 #endif
 
+// Velocidad del log serie. En el ESP8266, 74880: la misma del ROM de
+// arranque, así su mensaje (motivo del reinicio) se lee en vez de verse como
+// basura. Debe coincidir con monitor_speed en platformio.ini.
+#ifndef SERIAL_BAUD
+#if defined(ESP8266)
+#define SERIAL_BAUD 74880
+#else
+#define SERIAL_BAUD 115200
+#endif
+#endif
+
 #define FW_MAJOR 0
 #define FW_MINOR 2
 

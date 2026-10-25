@@ -61,9 +61,12 @@ SensorStatus dht22_read(SensorReading& out) {
   int bits = 0;
   noInterrupts();  // ~5 ms: los tiempos de cada bit son de decenas de µs
   pinMode(PIN_DHT22, INPUT_PULLUP);
-  // Respuesta: el sensor baja la línea 20-40 µs después, 80 µs en bajo y
-  // 80 µs en alto.
-  responded = hold_time(HIGH) >= 0 && hold_time(LOW) >= 0 && hold_time(HIGH) >= 0;
+  // Respuesta: el sensor baja la línea 20-40 µs después de soltarla y la
+  // mantiene 80 µs en bajo y 80 µs en alto. A los 55 µs (como la librería de
+  // Adafruit) ya está en bajo si hay sensor; esperar a que la línea suba
+  // antes desfasaría la lectura si la pull-up tarda en levantarla.
+  delayMicroseconds(55);
+  responded = digitalRead(PIN_DHT22) == LOW && hold_time(LOW) >= 0 && hold_time(HIGH) >= 0;
   // Cada bit: ~50 µs en bajo y luego en alto 26-28 µs (0) o ~70 µs (1).
   while (responded && bits < 40) {
     if (hold_time(LOW) < 0) {

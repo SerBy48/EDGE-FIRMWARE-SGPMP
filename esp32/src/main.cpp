@@ -53,14 +53,42 @@ sgpmp::Header next_header() {
 
 // LoRa.begin() solo devuelve false: se relee RegVersion para que el log
 // diga qué revisar, igual que raspberry/scripts/lora_check.py.
-void report_radio_failure() {
-  constexpr uint8_t kRegVersion = 0x42;
+constexpr uint8_t kRegOpMode = 0x01;
+constexpr uint8_t kRegModemConfig1 = 0x1D;
+constexpr uint8_t kRegModemConfig2 = 0x1E;
+constexpr uint8_t kRegVersion = 0x42;
+
+uint8_t radio_read(uint8_t reg) {
   SPI.beginTransaction(SPISettings(LORA_SPI_HZ, MSBFIRST, SPI_MODE0));
   digitalWrite(PIN_LORA_SS, LOW);
-  SPI.transfer(kRegVersion);
-  const uint8_t version = SPI.transfer(0x00);
+  SPI.transfer(reg & 0x7F);
+  const uint8_t value = SPI.transfer(0x00);
   digitalWrite(PIN_LORA_SS, HIGH);
   SPI.endTransaction();
+  return value;
+}
+
+// La librería divide por el ancho de banda que lee del chip (setLdoFlag): si
+// el SPI devuelve basura, divide por cero y el ESP8266 se reinicia. Antes de
+// usarla se comprueba que el chip esté en modo LoRa con BW (0-9) y SF (6-12)
+// válidos.
+bool radio_registers_ok(const char* when) {
+  const uint8_t op = radio_read(kRegOpMode);
+  const uint8_t mc1 = radio_read(kRegModemConfig1);
+  const uint8_t mc2 = radio_read(kRegModemConfig2);
+  const uint8_t bw = mc1 >> 4, sf = mc2 >> 4;
+  if ((op & 0x80) && bw <= 9 && sf >= 6 && sf <= 12) {
+    return true;
+  }
+  Serial.printf(
+      "[lora] el SX1276 responde pero sus registros no son coherentes %s (OpMode=0x%02x "
+      "ModemConfig1=0x%02x ModemConfig2=0x%02x): cables SPI flojos o alimentación inestable\n",
+      when, op, mc1, mc2);
+  return false;
+}
+
+void report_radio_failure() {
+  const uint8_t version = radio_read(kRegVersion);
   const char* hint = version == 0x00   ? "sin alimentación (VCC 3.3 V y GND), MISO o NSS mal cableados"
                      : version == 0xFF ? "MISO al aire o sin alimentación (3.3 V y GND)"
                                        : "SCK/MOSI cruzados o cables flojos";
@@ -77,6 +105,9 @@ bool radio_begin() {
     report_radio_failure();
     return false;
   }
+  if (!radio_registers_ok("al iniciarlo")) {
+    return false;
+  }
   LoRa.setSpreadingFactor(LORA_SF);
   LoRa.setSignalBandwidth(LORA_BW_HZ);
   LoRa.setCodingRate4(LORA_CR);
@@ -84,6 +115,13 @@ bool radio_begin() {
   LoRa.setPreambleLength(8);
   LoRa.enableCrc();
   LoRa.setTxPower(LORA_TX_POWER_DBM, PA_OUTPUT_PA_BOOST_PIN);
+  // Si la escritura no quedó (SPI inestable), la trama saldría con otros
+  // parámetros y la Raspberry no la oiría.
+  if (!radio_registers_ok("tras configurarlo") ||
+      (radio_read(kRegModemConfig2) >> 4) != LORA_SF) {
+    Serial.println("[lora] la configuración no quedó escrita en el SX1276: revisar cables SPI");
+    return false;
+  }
   return true;
 }
 
@@ -239,7 +277,7 @@ void transmit_burst(NodeConfig& cfg, uint32_t now) {
 
 void setup() {
   platform_begin();
-  Serial.begin(115200);
+  Serial.begin(SERIAL_BAUD);
 
   bool cold = !platform_woke_from_sleep();
   if (!cold) {

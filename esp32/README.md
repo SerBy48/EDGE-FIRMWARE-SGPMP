@@ -108,7 +108,7 @@ I2C (direcciones 0x68 y 0x57).
 pip install platformio
 pio run -e nodemcuv2                  # compilar
 pio run -e nodemcuv2 -t upload        # flashear
-pio device monitor                    # logs por serial (115200)
+pio device monitor                    # logs por serial (74880 en el ESP8266)
 pio test -e native                    # tests del codec (requiere gcc/g++)
 ```
 
