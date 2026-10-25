@@ -2,7 +2,8 @@
 
 Firmware de cada nodo sensor con su propio SX1276 (Fase 1). Captura sensores
 y transmite por LoRa al gateway (la Raspberry) siguiendo
-`../docs/PROTOCOLO_LORA.md`. Nunca habla MQTT.
+`../docs/PROTOCOLO_LORA.md`, con el protocolo v2: cada trama va cifrada y
+autenticada con la clave propia del nodo (§11). Nunca habla MQTT.
 
 Hay dos placas soportadas (la carpeta conserva el nombre `esp32/`):
 
@@ -102,20 +103,38 @@ I2C (direcciones 0x68 y 0x57).
   modo de carga. El RESET del SX1276 puede quedar al aire.
 - Solo quedan libres RX/TX (serial de logs) y A0 (batería, ver abajo).
 
+## Identidad y clave del nodo (`secrets.ini`)
+
+Cada nodo se identifica con el serial con que se registró en la plataforma.
+Su `node_id` de radio y su clave AES los deriva la Raspberry de ese serial y
+del secreto del sitio; nadie genera claves a mano. Para flashear un nodo:
+
+1. En la Raspberry: `sudo /opt/sgpmp-edge/bin/lora-key <serial del nodo>`
+   (el serial también va en `EDGE_SERIALS`, ver `INSTALACION_RASPBERRY.md` §9.3).
+2. Copiar todo lo que imprime a `esp32/secrets.ini` en este PC, en UTF-8 o
+   ASCII. PlatformIO lo incluye solo (`extra_configs`).
+3. Flashear como siempre. Un archivo por nodo: para el siguiente, reemplazarlo
+   con el suyo.
+
+`secrets.ini` contiene la clave del nodo: está en `.gitignore` y nunca se sube
+al repositorio. Sin ese archivo el firmware compila (así corre el CI), pero
+no transmite: el monitor muestra `[lora] sin clave`.
+
 ## Compilar, flashear, probar
 
 ```bash
 pip install platformio
 pio run -e nodemcuv2                  # compilar
-pio run -e nodemcuv2 -t upload        # flashear
+pio run -e nodemcuv2 -t upload        # flashear (con el secrets.ini del nodo)
 pio device monitor                    # logs por serial (74880 en el ESP8266)
-pio test -e native                    # tests del codec (requiere gcc/g++)
+pio test -e native                    # tests del codec y del cifrado (requiere gcc/g++)
 ```
 
 Salida esperada en el monitor al encender:
 
 ```
-[boot] nodo 0x0001 fw 0.2 (encendido)
+[boot] nodo TC-M09-G64-1789321890010 (0xd35d) fw 0.3 (encendido)
+[lora] huella de clave 219b1a1d
 [sensor] MAX30102 sin dedo: no se mide
 [sensor] code 1 = 24.30
 [sensor] code 2 = 58.10
@@ -133,6 +152,8 @@ Cuando algo falla, el log dice qué revisar:
 
 | Mensaje | Qué revisar |
 |---|---|
+| `[lora] sin clave` | falta `secrets.ini` al compilar: generarlo con `lora-key` y volver a flashear |
+| `CONFIG con MIC inválido` | el CONFIG no se selló con la clave de este nodo; comparar la huella con la del log de la Raspberry |
 | `el SX1276 no responde (RegVersion=0x00 ...)` | VCC/GND del módulo LoRa, MISO o NSS |
 | `el SX1276 no responde (RegVersion=0xFF ...)` | MISO al aire o módulo sin alimentación |
 | `DS18B20 ... CRC del scratchpad inválido` | contacto flojo o pull-up débil |
@@ -147,8 +168,9 @@ mal cableado (VCC, GND, pin de datos).
 
 | Flag | Obligatorio | Descripción |
 |---|---|---|
-| `NODE_ID` | sí | 1–65534, único en el sitio; mapearlo en `EDGE_LORA_NODES` |
+| `NODE_SERIAL`, `NODE_ID`, `LORA_KEY_HEX` | sí | vienen de `secrets.ini` (`lora-key`); no se escriben a mano |
 | `NET_ID` | sí | igual a `EDGE_LORA_NET_ID` de la Raspberry |
+| `FCNT_BLOQUE` | no (1024) | contadores de trama que se reservan por escritura en flash |
 | `LORA_FREQ_HZ`, `LORA_TX_POWER_DBM` | sí | **[confirmar]** con la regulación de la ANE |
 | `LORA_SF`, `LORA_BW_HZ`, `LORA_CR`, `LORA_SYNC_WORD` | no (9, 125000, 5, 0x12) | deben coincidir con la Raspberry |
 | `PIN_LORA_*`, `PIN_DHT22`, `PIN_DS18B20`, `PIN_I2C_SDA`, `PIN_I2C_SCL` | no | por defecto, la tabla de cableado de arriba (ESP32: ver `include/config.h`) |
@@ -185,18 +207,23 @@ code sin mapear se descarta en la Raspberry con un warning.
 ```
 platformio.ini
 include/config.h            # flags de compilación, pines y valores por defecto
-lib/sgpmp_protocol/         # codec de tramas (C++ puro, compartido con los tests)
+lib/sgpmp_protocol/         # codec de tramas v1/v2 y AES-CCM (C++ puro, compartido con los tests)
 src/main.cpp                # ciclo captura → ráfaga → ventana RX → deep sleep
 src/platform.*              # deep sleep, memoria RTC y WiFi de cada placa
 src/sensors.*               # catálogo: detección, estado y variables de cada captura
 src/sensor_*.cpp            # un driver por sensor (DHT22, DS18B20, MPU6050, MAX30102)
-src/node_config.*           # config persistida en flash (NVS / EEPROM)
+src/node_config.*           # config y contadores v2 persistidos en flash (NVS / EEPROM)
 src/battery.*               # nivel de batería por ADC
-test/test_protocol/         # vectores de PROTOCOLO_LORA.md §9
+test/test_protocol/         # vectores de PROTOCOLO_LORA.md §9 y §11, FIPS-197 y SP 800-38C
 ```
 
 ## Pendiente
 
+- Medir en el ESP8266 el tiempo de cifrado por trama (se espera del orden de
+  milisegundos, frente a cientos de ms de transmisión).
+- No borrar la flash del nodo (`pio run -t erase`): su contador de tramas
+  vuelve a 0 y la Raspberry lo rechaza como repetición
+  (`INSTALACION_RASPBERRY.md` §12).
 - Verificar en hardware real (docs/PRUEBAS_CAMPO.md): la ventana RX tras
   `endPacket()` y el consumo en deep sleep (el NodeMCU tiene regulador y
   USB-serial que consumen aunque el ESP8266 duerma).

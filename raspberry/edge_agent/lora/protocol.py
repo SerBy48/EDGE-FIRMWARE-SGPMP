@@ -16,6 +16,9 @@ import struct
 from dataclasses import dataclass
 from enum import IntEnum
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESCCM
+
 PROTOCOL_VERSION = 1
 HEADER_LEN = 6
 CRC_LEN = 2
@@ -65,6 +68,10 @@ class Sensor:
 
 class FrameError(ValueError):
     """Trama inválida: se descarta sin afectar al resto del gateway."""
+
+
+class MicInvalido(FrameError):
+    """Trama v2 con MIC que no verifica: clave equivocada, alterada o falsificada."""
 
 
 @dataclass(frozen=True)
@@ -253,3 +260,82 @@ def build(net_id: int, node_id: int, seq: int, message: Message) -> bytes:
 def parse(data: bytes) -> tuple[Frame, Message]:
     frame = decode_frame(data)
     return frame, decode_message(frame.msg_type, frame.payload)
+
+
+# --- Protocolo v2: AES-128-CCM (docs/PROTOCOLO_LORA.md §11) -----------------
+#
+# Trama: ver(1)=2 net_id(1) node_id(2) msg_type(1) fcnt(4) payload(N) mic(4)
+# La cabecera va en claro y autenticada; el payload va cifrado. Los mensajes
+# son los mismos de v1 (encode_message / decode_message).
+
+PROTOCOL_VERSION_V2 = 2
+V2_HEADER_LEN = 9
+MIC_LEN = 4
+V2_MAX_PAYLOAD_LEN = MAX_FRAME_LEN - V2_HEADER_LEN - MIC_LEN
+V2_MAX_MEASUREMENTS = (V2_MAX_PAYLOAD_LEN - 3) // 5
+
+
+class Direccion(IntEnum):
+    """Sentido de la trama: entra en el nonce, así subida y bajada nunca lo comparten."""
+
+    SUBIDA = 0x00  # nodo -> Raspberry
+    BAJADA = 0x01  # Raspberry -> nodo
+
+
+@dataclass(frozen=True)
+class FrameV2:
+    net_id: int
+    node_id: int
+    msg_type: int
+    fcnt: int  # contador de tramas del emisor: nunca se repite con la misma clave
+
+
+def _nonce_v2(direccion: Direccion, frame: FrameV2) -> bytes:
+    return struct.pack(">BBHI", direccion, frame.net_id, frame.node_id, frame.fcnt) + bytes(5)
+
+
+def _header_v2(frame: FrameV2) -> bytes:
+    return struct.pack(
+        ">BBHBI", PROTOCOL_VERSION_V2, frame.net_id, frame.node_id, frame.msg_type, frame.fcnt
+    )
+
+
+def peek_v2(data: bytes) -> FrameV2:
+    """Cabecera sin descifrar: para elegir la clave y descartar un fcnt viejo antes."""
+    if not V2_HEADER_LEN + MIC_LEN <= len(data) <= MAX_FRAME_LEN:
+        raise FrameError(f"trama v2 de {len(data)} B")
+    version, net_id, node_id, msg_type, fcnt = struct.unpack(">BBHBI", data[:V2_HEADER_LEN])
+    if version != PROTOCOL_VERSION_V2:
+        raise FrameError(f"versión de protocolo no soportada: {version}")
+    return FrameV2(net_id, node_id, msg_type, fcnt)
+
+
+def seal_v2(key: bytes, direccion: Direccion, frame: FrameV2, payload: bytes) -> bytes:
+    if len(payload) > V2_MAX_PAYLOAD_LEN:
+        raise FrameError(f"payload de {len(payload)} B excede {V2_MAX_PAYLOAD_LEN} B en v2")
+    header = _header_v2(frame)
+    sealed = AESCCM(key, tag_length=MIC_LEN).encrypt(_nonce_v2(direccion, frame), payload, header)
+    return header + sealed
+
+
+def open_v2(key: bytes, direccion: Direccion, data: bytes) -> tuple[FrameV2, bytes]:
+    frame = peek_v2(data)
+    try:
+        payload = AESCCM(key, tag_length=MIC_LEN).decrypt(
+            _nonce_v2(direccion, frame), data[V2_HEADER_LEN:], data[:V2_HEADER_LEN]
+        )
+    except InvalidTag as exc:
+        raise MicInvalido("MIC inválido: clave equivocada o trama alterada") from exc
+    return frame, payload
+
+
+def build_v2(
+    key: bytes, direccion: Direccion, net_id: int, node_id: int, fcnt: int, message: Message
+) -> bytes:
+    msg_type, payload = encode_message(message)
+    return seal_v2(key, direccion, FrameV2(net_id, node_id, msg_type, fcnt), payload)
+
+
+def parse_v2(key: bytes, direccion: Direccion, data: bytes) -> tuple[FrameV2, Message]:
+    frame, payload = open_v2(key, direccion, data)
+    return frame, decode_message(frame.msg_type, payload)

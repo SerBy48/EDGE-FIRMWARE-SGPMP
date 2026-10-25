@@ -73,10 +73,16 @@ def _build_source(settings: Settings) -> DataSource:
     if settings.lora is None:
         return FakeLoraSource(settings.fake_variables)
     # Import diferido: spidev/gpiozero solo existen en la Raspberry.
+    from edge_agent.lora import keys
+    from edge_agent.lora.estado import LoraEstado
     from edge_agent.lora.gateway import LoraGateway, LoraVariable
     from edge_agent.lora.sx1276 import SX1276, RadioConfig, gpio_reset, open_spi
 
     lora = settings.lora
+    nodos_v2 = {
+        node_id: (serial, keys.clave_de(lora.secreto_sitio, serial))
+        for node_id, serial in lora.nodos_v2.items()
+    }
     reset = gpio_reset(lora.reset_gpio) if lora.reset_gpio is not None else None
     radio = SX1276(open_spi(lora.spi_bus, lora.spi_device), reset=reset)
     return LoraGateway(
@@ -92,6 +98,10 @@ def _build_source(settings: Settings) -> DataSource:
         lora.net_id,
         lora.nodes,
         {code: LoraVariable(*var) for code, var in lora.variables.items()},
+        nodos_v2=nodos_v2,
+        aceptar_v1=lora.aceptar_v1,
+        # Contadores anti-repetición: junto a la config, en el mismo directorio de estado.
+        estado=LoraEstado(settings.state_path.with_name("lora.json")),
         downlink_delay_s=lora.downlink_delay_ms / 1000,
     )
 

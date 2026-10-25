@@ -2,9 +2,22 @@
 // build_flags en platformio.ini (-DNOMBRE=valor).
 #pragma once
 
-// --- Identidad -----------------------------------------------------------
+// --- Identidad (protocolo v2, docs/PROTOCOLO_LORA.md §11) -----------------
+// NODE_SERIAL, NODE_ID y LORA_KEY_HEX vienen de esp32/secrets.ini, que entrega
+// la Raspberry con `sudo /opt/sgpmp-edge/bin/lora-key <serial>`. Sin ese
+// archivo el firmware compila (CI), pero no transmite: avisa por el serial.
+#ifndef NODE_SERIAL
+#define NODE_SERIAL ""
+#endif
 #ifndef NODE_ID
-#error "Definir NODE_ID (1-65534), único por nodo del sitio"
+#define NODE_ID 0
+#endif
+#ifndef LORA_KEY_HEX
+#define LORA_KEY_HEX ""
+#endif
+// fcnt de subida que se reservan por escritura en flash (ver node_config.h).
+#ifndef FCNT_BLOQUE
+#define FCNT_BLOQUE 1024
 #endif
 #ifndef NET_ID
 #error "Definir NET_ID: debe coincidir con EDGE_LORA_NET_ID de la Raspberry"
@@ -22,7 +35,7 @@
 #endif
 
 #define FW_MAJOR 0
-#define FW_MINOR 2
+#define FW_MINOR 3
 
 // --- Radio (docs/PROTOCOLO_LORA.md §2) -----------------------------------
 // Frecuencia y potencia sin default a propósito: dependen de la regulación.
