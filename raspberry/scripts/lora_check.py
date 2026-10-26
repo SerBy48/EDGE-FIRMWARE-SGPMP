@@ -100,7 +100,7 @@ def main() -> None:
     if versions != {CHIP_VERSION}:
         seen = ", ".join(f"0x{v:02x}" for v in sorted(versions))
         if versions == {0x00}:
-            hint = "MISO a GND, módulo sin alimentación o NSS mal cableado"
+            hint = "módulo sin alimentación (VCC 3.3 V y GND), MISO o NSS mal cableados"
         elif versions == {0xFF}:
             hint = "MISO al aire o módulo sin alimentación (3.3 V y GND)"
         elif len(versions) > 1:

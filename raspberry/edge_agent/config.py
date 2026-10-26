@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from edge_agent import __version__
@@ -44,12 +44,22 @@ class LoraSettings:
     cr: int
     sync_word: int
     net_id: int
-    nodes: dict[int, str]  # node_id -> serial MQTT
+    nodes: dict[int, str]  # v1: node_id -> serial MQTT (EDGE_LORA_NODES)
     variables: dict[int, tuple[str, str]]  # code -> (nombre, unidad)
     spi_bus: int
     spi_device: int
     reset_gpio: int | None
     downlink_delay_ms: int
+    secreto_sitio: bytes | None = None  # v2: raíz de las claves de los nodos
+    nodos_v2: dict[int, str] = field(default_factory=dict)  # v2: node_id derivado -> serial
+    aceptar_v1: bool = True  # transición: tramas v1 de nodos que aún no migraron
+
+    def __repr__(self) -> str:
+        # El secreto del sitio nunca debe terminar en un log.
+        return (
+            f"LoraSettings(freq_hz={self.freq_hz}, sf={self.sf}, net_id=0x{self.net_id:02x}, "
+            f"nodos_v1={len(self.nodes)}, nodos_v2={len(self.nodos_v2)})"
+        )
 
 
 @dataclass(frozen=True)
@@ -104,7 +114,11 @@ class Settings:
         source = env.get("EDGE_SOURCE", "fake")
         if source not in ("fake", "lora"):
             raise ConfigError(f"EDGE_SOURCE debe ser 'fake' o 'lora', llegó {source!r}")
-        lora = parse_lora_settings(env, serials) if source == "lora" else None
+        lora = (
+            parse_lora_settings(env, serials, env.get("EDGE_MQTT_USERNAME"))
+            if source == "lora"
+            else None
+        )
 
         return cls(
             mqtt_host=_require(env, "EDGE_MQTT_HOST"),
@@ -235,17 +249,54 @@ def _parse_fake_variables(raw: str) -> tuple[FakeVariable, ...]:
 
 
 def parse_lora_settings(
-    env: Mapping[str, str], serials: tuple[str, ...] | None = None
+    env: Mapping[str, str],
+    serials: tuple[str, ...] | None = None,
+    edge_serial: str | None = None,
 ) -> LoraSettings:
-    """`serials=None` omite validar contra EDGE_SERIALS (monitor de enlace)."""
+    """`serials=None` toma EDGE_SERIALS del entorno sin exigirlo (monitor de enlace).
+
+    Nodos v2: cada serial de EDGE_SERIALS menos el del propio Edge, con el
+    `node_id` derivado de su serial (lora/keys.py). Nodos v1: el mapeo manual
+    EDGE_LORA_NODES, solo mientras migran.
+    """
+    from edge_agent.lora import keys  # import diferido: cryptography solo hace falta con LoRa
+
+    validate_serials = serials is not None
+    if serials is None:
+        serials = tuple(s.strip() for s in env.get("EDGE_SERIALS", "").split(",") if s.strip())
+
     # Frecuencia y potencia: sin default, dependen de la regulación (ANE).
-    nodes = _parse_mapping(_require(env, "EDGE_LORA_NODES"), "EDGE_LORA_NODES", ",")
+    raw_nodes = env.get("EDGE_LORA_NODES", "").strip()
+    nodes = _parse_mapping(raw_nodes, "EDGE_LORA_NODES", ",") if raw_nodes else {}
     parsed_nodes: dict[int, str] = {}
     for key, serial in nodes.items():
         node_id = _parse_int_value(key, "EDGE_LORA_NODES", 1, 0xFFFE)
-        if serials is not None and serial not in serials:
+        if validate_serials and serial not in serials:
             raise ConfigError(f"EDGE_LORA_NODES: el serial {serial!r} no está en EDGE_SERIALS")
         parsed_nodes[node_id] = serial
+
+    secreto = None
+    nodos_v2: dict[int, str] = {}
+    raw_secreto = env.get("EDGE_LORA_SECRETO_SITIO", "").strip()
+    if raw_secreto:
+        try:
+            secreto = keys.parse_secreto(raw_secreto)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+        for serial in serials:
+            if serial == edge_serial:
+                continue  # la Raspberry no es un nodo de radio
+            node_id = keys.node_id_de(serial)
+            if node_id in nodos_v2:
+                raise ConfigError(
+                    f"EDGE_SERIALS: {nodos_v2[node_id]!r} y {serial!r} dan el mismo node_id "
+                    f"0x{node_id:04x}; cambiar el serial de uno de los dos en la plataforma"
+                )
+            nodos_v2[node_id] = serial
+    if not parsed_nodes and secreto is None:
+        raise ConfigError(
+            "Falta EDGE_LORA_SECRETO_SITIO (lo genera install.sh) o, para nodos v1, EDGE_LORA_NODES"
+        )
 
     variables: dict[int, tuple[str, str]] = {}
     raw_vars = _parse_mapping(_require(env, "EDGE_LORA_VARIABLES"), "EDGE_LORA_VARIABLES", ";")
@@ -271,6 +322,9 @@ def parse_lora_settings(
         spi_device=_int_in(env, "EDGE_LORA_SPI_DEVICE", "0", 0, 9),
         reset_gpio=_parse_int_value(reset, "EDGE_LORA_RESET_GPIO", 0, 53) if reset else None,
         downlink_delay_ms=_int_in(env, "EDGE_LORA_DOWNLINK_DELAY_MS", "50", 0, 1000),
+        secreto_sitio=secreto,
+        nodos_v2=nodos_v2,
+        aceptar_v1=_int_in(env, "EDGE_LORA_ACEPTAR_V1", "1", 0, 1) == 1,
     )
 
 

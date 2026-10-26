@@ -27,8 +27,8 @@ revisión.
 | M1 — enlace MQTT persistente | Implementado | Tests unitarios y smoke contra un broker local | Sesión persistente contra el Mosquitto de dev (M3) |
 | M2 — operación sin SSH | Implementado, con actualización automática | Tests (sd_notify), sintaxis del instalador, elección de release y rollback del updater | Instalación real en la Pi 3; reglas de GitHub para `main` y tags `v*`; secret `GH_TOKEN` del versionamiento automático |
 | M3 — aceptación automática | Implementado | — | Ejecutar `pytest -m integration` contra dev |
-| Fase 0 — protocolo LoRa v1 | Propuesta implementada | Vectores idénticos en Python y C++ | Revisión del equipo de hardware; frecuencia/potencia con la ANE |
-| Fase 1 — firmware nodo sensor | Implementado para ESP8266 (NodeMCU + DHT22 + DS18B20) y ESP32 (simulado) | Compila (`pio run`), tests del codec | Hardware real; nombre en BD de la variable del DS18B20 |
+| Fase 0 — protocolo LoRa v1 y v2 | v2 (cifrado AES-128-CCM, identidad por serial) implementado; v1 solo en migración | Vectores idénticos en Python y C++; AES/CCM contra FIPS-197 y SP 800-38C | Revisión del equipo de hardware; frecuencia/potencia con la ANE; mejora futura: `MEJORA_LISTA_DISPOSITIVOS_EDGE.md` |
+| Fase 1 — firmware nodo sensor | Implementado para ESP8266 (catálogo DHT22, DS18B20, MPU6050, MAX30102; protocolo v2) y ESP32 (simulado) | Compila (`pio run`), tests del codec; DHT22 y DS18B20 en hardware | MPU6050, MAX30102 y v2 en hardware; nombres en BD de los codes 3–9 |
 | Fase 2 — gateway LoRa en la RPi | Implementado | Tests contra un SX1276 simulado a nivel de registros | Hardware real |
 | Fase 3 — pruebas de campo | Protocolo escrito (`PRUEBAS_CAMPO.md`) + monitor de enlace | — | Ejecutarlo |
 

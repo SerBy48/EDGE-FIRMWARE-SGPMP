@@ -11,9 +11,9 @@ documento de resultados.
 | Paso | Cómo | Verificación |
 |---|---|---|
 | Parámetros de radio legales | Confirmar frecuencia y potencia con la ANE; fijar `EDGE_LORA_FREQ_HZ`/`EDGE_LORA_TX_POWER_DBM` y `LORA_FREQ_HZ`/`LORA_TX_POWER_DBM` | Mismo valor en `/etc/sgpmp/edge-agent.env` y en `platformio.ini` |
-| Nodos flasheados | `pio run -e nodemcuv2 -t upload` (o `esp32dev`) con un `NODE_ID` distinto por nodo | Serial del ESP32 muestra `[boot] nodo 0x000N` |
+| Nodos flasheados | `pio run -e nodemcuv2 -t upload` con el `secrets.ini` de cada nodo (`lora-key <serial>`, `INSTALACION_RASPBERRY.md` §9.3) | El monitor serie muestra `[boot] nodo <serial>` y la misma huella de clave que el log de la Raspberry |
 | Raspberry instalada | `sudo raspberry/scripts/install.sh --env ...` con `EDGE_SOURCE=lora` | `systemctl status edge-agent` activo; log "Gateway LoRa escuchando" |
-| Seriales registrados | Cada serial de `EDGE_LORA_NODES` existe en `modulo9.dispositivos_iot` | `GET /v1/devices` los lista |
+| Seriales registrados | Cada serial de nodo de `EDGE_SERIALS` existe en `modulo9.dispositivos_iot` y apunta a este Gateway Edge | `GET /v1/devices` los lista |
 | Variables | Cada `nombre` de `EDGE_LORA_VARIABLES` existe en `modulo9.variables_ambientales` | La telemetría aparece en la BD, sin `VariableNotFoundError` en el broker |
 
 Para las pruebas de enlace (L1–L4) se usa el monitor, con el servicio detenido
