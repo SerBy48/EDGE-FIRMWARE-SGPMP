@@ -101,7 +101,7 @@ log "Entorno virtual en $PREFIX/venv"
 # COMMIT: desde dónde sigue update.sh. VERSION: version_firmware del heartbeat.
 if git -C "$SRC_DIR" -c safe.directory='*' rev-parse HEAD >"$PREFIX/COMMIT.tmp" 2>/dev/null; then
   mv "$PREFIX/COMMIT.tmp" "$PREFIX/COMMIT"
-  git -C "$SRC_DIR" -c safe.directory='*' describe --tags --always --dirty >"$PREFIX/VERSION"
+  git -C "$SRC_DIR" -c safe.directory='*' describe --tags --match 'v[0-9]*' --always --dirty >"$PREFIX/VERSION"
   log "Versión $(cat "$PREFIX/VERSION")"
 else
   rm -f "$PREFIX/COMMIT.tmp" "$PREFIX/COMMIT" "$PREFIX/VERSION"

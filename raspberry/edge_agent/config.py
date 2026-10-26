@@ -11,6 +11,7 @@ sin default en código — RF-60 Restricción 1 prohíbe valores fijos.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -137,13 +138,48 @@ def _firmware_version(env: Mapping[str, str]) -> str:
     """Release instalado (`git describe` que escribe install.sh) o la del paquete.
 
     Va en `version_firmware` del heartbeat: así el servidor ve qué release corre
-    cada Raspberry después de una actualización automática.
+    cada Raspberry después de una actualización automática. Se normaliza a
+    SemVer 2.0 (FW-06) para que el backend pueda compararla con el mínimo.
     """
     path = Path(env.get("EDGE_VERSION_FILE", "/opt/sgpmp-edge/VERSION"))
     try:
-        return path.read_text(encoding="utf-8").strip() or __version__
+        raw = path.read_text(encoding="utf-8").strip()
     except OSError:
-        return __version__
+        raw = ""
+    return _semver(raw)
+
+
+_SEMVER_TAG = re.compile(r"v?\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?")
+_DESCRIBE_SUFFIX = re.compile(r"(?P<tag>.+)-(?P<commits>\d+)-g(?P<hash>[0-9a-f]+)")
+_COMMIT_HASH = re.compile(r"[0-9a-f]{7,40}")
+
+
+def _semver(raw: str) -> str:
+    """`git describe --tags --always --dirty` → SemVer 2.0 con prefijo `v`.
+
+    Lo que no es del release (commits después del tag, hash, `-dirty`) va como
+    metadato `+…`, que SemVer ignora al ordenar: `v0.2.0-3-gabc1234` se compara
+    como `0.2.0`, no como un prerelease anterior. Sin tag alcanzable (`--always`
+    devuelve solo el hash) se usa la versión del paquete. Un valor que no se
+    reconoce se manda tal cual: el backend lo registra como no comparable.
+    """
+    if not raw:
+        return f"v{__version__}"
+    rest, build = raw, []
+    if rest.endswith("-dirty"):
+        rest = rest[: -len("-dirty")]
+        build.append("dirty")
+    if _COMMIT_HASH.fullmatch(rest):
+        tag = f"v{__version__}"
+        build.insert(0, f"g{rest}")
+    elif match := _DESCRIBE_SUFFIX.fullmatch(rest):
+        tag = match["tag"]
+        build[:0] = [match["commits"], f"g{match['hash']}"]
+    else:
+        tag = rest
+    if not _SEMVER_TAG.fullmatch(tag):
+        return raw
+    return tag + ("+" + ".".join(build) if build else "")
 
 
 def _require(env: Mapping[str, str], name: str) -> str:

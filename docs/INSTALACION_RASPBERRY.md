@@ -187,7 +187,9 @@ El instalador (tarda 3–6 minutos en una Pi 3):
    grupos `spi` y `gpio`.
 4. Copia el código a `/opt/sgpmp-edge/app`, crea el entorno virtual en
    `/opt/sgpmp-edge/venv` y anota la versión instalada en
-   `/opt/sgpmp-edge/VERSION` (es la `version_firmware` del heartbeat).
+   `/opt/sgpmp-edge/VERSION` (`git describe`; el agente la manda en
+   `version_firmware` del heartbeat normalizada a SemVer, ver
+   `docs/RELEASES.md` §2).
 5. Copia la configuración a `/etc/sgpmp/edge-agent.env` (0600, root).
 6. **Valida la configuración** (`--check-config`). Si hay un error, se
    detiene sin arrancar nada y muestra qué variable falta o es inválida.
