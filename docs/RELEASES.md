@@ -68,6 +68,21 @@ entonces tiene que seguir el mismo formato.
    el heartbeat. Para no esperar en un equipo con acceso:
    `sudo systemctl start edge-updater` y `journalctl -u edge-updater`.
 
+**Formato de `version_firmware` (FW-06).** Es SemVer 2.0 con prefijo `v`, para
+que el backend la compare con `version_minima_firmware`. El agente la arma con
+el `git describe` de la instalación; lo que no es el release va como
+metadato `+…`, que SemVer ignora al ordenar:
+
+| Instalado desde | `version_firmware` |
+|---|---|
+| un release o un rc | `v0.2.0`, `v0.2.0-rc.1` |
+| 3 commits después de `v0.2.0` | `v0.2.0+3.gabc1234` |
+| con cambios locales | `v0.2.0+dirty` |
+| un commit sin tag alcanzable | `v0.1.1+gf889231` (versión del paquete) |
+
+Es la versión del `edge_agent` de la Raspberry, no la del firmware de los
+nodos: va igual en el heartbeat de cada serial que atiende.
+
 Para fusionar en `main` sin desplegar, el PR solo puede traer commits que no
 generan release (`docs`, `chore`, `ci`, `test`).
 
