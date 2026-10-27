@@ -1,8 +1,8 @@
 """Orquestación del edge_agent.
 
 Un único hilo maneja todo el estado: agenda de captura/transmisión/heartbeat
-por serial, comandos RF-23 y RF-17 (umbrales) y vaciado del buffer. El hilo de paho solo entrega
-eventos por una cola (`mqtt_client.py`).
+por serial, comandos RF-23, RF-17 (umbrales) y RF-55 (reglas) y vaciado del
+buffer. El hilo de paho solo entrega eventos por una cola (`mqtt_client.py`).
 
 Reglas de `docs/PLAN_DESARROLLO.md` sección 2:
 - heartbeat_efectivo = min(HEARTBEAT_INTERVAL, frecuencia_captura / 2),
@@ -28,15 +28,20 @@ from typing import Any, Protocol
 from edge_agent import buffer as buf
 from edge_agent.buffer import Buffer
 from edge_agent.commands import (
+    TIPO_ACK,
+    TIPO_ACK_REGLA,
     TIPO_ACK_UMBRAL,
+    TIPO_COMANDO_REGLA,
     TIPO_COMANDO_UMBRAL,
     error_ack,
     handle_command,
+    handle_regla,
     handle_umbral,
 )
 from edge_agent.config import Settings
 from edge_agent.config_store import ConfigStore, UmbralStore
 from edge_agent.mqtt_client import Connected, Event, Message, PubAck
+from edge_agent.reglas.store import ReglaStore
 from edge_agent.sources import DataSource, Reading
 from edge_agent.system import ntp_sincronizado
 
@@ -49,6 +54,13 @@ _INFLIGHT_TIMEOUT_S = 300
 # Telemetría que sale más tarde que esto respecto de su ventana de
 # transmisión se marca como BUFFER_LOCAL (estuvo retenida por falta de red).
 _GRACIA_TIEMPO_REAL_S = 60
+# Comandos que el broker ya despacha (BRK-05) pero que este Edge todavía no
+# implementa (RF-65/RF-66): se rechazan con su propio tipo de ACK para que el
+# broker resuelva la espera como ERROR en vez de agotar el timeout.
+_ACK_NO_SOPORTADO = {
+    "CONFIG_MOTOR_IA": "ACK_CONFIG_MOTOR",
+    "TIPO_MODELO_ASIGNADO": "ACK_TIPO_MODELO",
+}
 
 
 class Link(Protocol):
@@ -75,6 +87,7 @@ class Agent:
         source: DataSource,
         *,
         umbrales: UmbralStore,
+        reglas: ReglaStore,
         reloj_sincronizado: Callable[[], bool] = ntp_sincronizado,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -84,6 +97,12 @@ class Agent:
         self._buffer = buffer
         self._source = source
         self._umbrales = umbrales
+        self._reglas = reglas
+        # Sin `tipo_comando` es la configuración RF-23 (caso por defecto).
+        self._comandos: dict[str, Callable[[str, dict[str, Any], float], dict[str, Any]]] = {
+            TIPO_COMANDO_UMBRAL: self._on_umbral,
+            TIPO_COMANDO_REGLA: self._on_regla,
+        }
         self._reloj_sincronizado = reloj_sincronizado
         self._clock = clock
         self._inflight: dict[int, tuple[int, float]] = {}  # mid -> (row_id, enviado_en)
@@ -169,10 +188,14 @@ class Agent:
             return
 
         data = _json_object(payload)
-        if data is not None and data.get("tipo_comando") == TIPO_COMANDO_UMBRAL:
-            ack = self._on_umbral(serial, data, now)
-        else:
+        tipo = data.get("tipo_comando") if data is not None else None
+        handler = self._comandos.get(tipo) if isinstance(tipo, str) else None
+        if tipo is None:
             ack = self._on_configuracion(serial, payload, now)
+        elif handler is not None:
+            ack = handler(serial, data, now)
+        else:
+            ack = self._on_no_soportado(serial, tipo, data)
 
         self._buffer.enqueue(
             serial=serial,
@@ -230,6 +253,38 @@ class Agent:
             detalle,
         )
         return ack
+
+    def _on_regla(self, serial: str, data: dict[str, Any], now: float) -> dict[str, Any]:
+        result = handle_regla(
+            data,
+            self._reglas.get(data.get("id_regla_alerta")),
+            ahora=now if self._reloj_sincronizado() else None,
+            antiguedad_max_s=self._settings.comando_antiguedad_max_s,
+        )
+        ack = result.ack
+        changed = False
+        if result.regla is not None:
+            try:
+                changed = self._reglas.set(result.regla)
+            except OSError:
+                logger.exception("No se pudo persistir la regla recibida por %s", serial)
+                ack = error_ack(
+                    ack.get("id_comando"), "no se pudo persistir la regla", tipo=TIPO_ACK_REGLA
+                )
+        detalle = ack.get("motivo") or ("guardada" if changed else "sin cambios")
+        logger.info(
+            "Regla %s v%s → %s (%s)",
+            data.get("id_regla_alerta"),
+            data.get("version_regla"),
+            ack["resultado"],
+            detalle,
+        )
+        return ack
+
+    def _on_no_soportado(self, serial: str, tipo: Any, data: dict[str, Any]) -> dict[str, Any]:
+        logger.warning("Comando de %s con tipo_comando no soportado: %r", serial, tipo)
+        tipo_ack = _ACK_NO_SOPORTADO.get(tipo, TIPO_ACK) if isinstance(tipo, str) else TIPO_ACK
+        return error_ack(data.get("id_comando"), "tipo de comando no soportado", tipo=tipo_ack)
 
     def _serial_from_command_topic(self, topic: str) -> str | None:
         prefix = f"{self._settings.topic_prefix}/"

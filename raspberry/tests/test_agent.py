@@ -193,7 +193,14 @@ def test_config_se_propaga_a_la_fuente_al_arrancar_y_con_cada_comando(tmp_path):
     h = Harness(tmp_path)
     source = StubSource()
     agent = Agent(
-        h.settings, h.link, h.store, h.buffer, source, umbrales=h.umbrales, clock=lambda: h.now
+        h.settings,
+        h.link,
+        h.store,
+        h.buffer,
+        source,
+        umbrales=h.umbrales,
+        reglas=h.reglas,
+        clock=lambda: h.now,
     )
     assert source.applied == [(SERIAL, 10)]
 

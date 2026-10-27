@@ -19,6 +19,7 @@ from edge_agent.buffer import Buffer
 from edge_agent.config import ConfigError, Settings
 from edge_agent.config_store import ConfigStore, DeviceConfig, UmbralStore
 from edge_agent.mqtt_client import Event, MqttLink
+from edge_agent.reglas.store import ReglaStore
 from edge_agent.sources import DataSource, FakeLoraSource
 from edge_agent.systemd import SystemdNotifier
 
@@ -65,7 +66,9 @@ def build(settings: Settings) -> Runtime:
     source = _build_source(settings)
     # RF-17: los umbrales viven junto a la config, en el mismo directorio de estado.
     umbrales = UmbralStore(settings.state_path.with_name("umbrales.json"))
-    agent = Agent(settings, link, store, buffer, source, umbrales=umbrales)
+    # RF-55: reglas de alerta, también en el directorio de estado (archivo propio).
+    reglas = ReglaStore(settings.state_path.with_name("reglas.json"))
+    agent = Agent(settings, link, store, buffer, source, umbrales=umbrales, reglas=reglas)
     return Runtime(settings, events, link, buffer, store, agent, source)
 
 
