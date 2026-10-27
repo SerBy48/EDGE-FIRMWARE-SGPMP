@@ -91,6 +91,8 @@ class Settings:
     comando_antiguedad_max_s: float = 120.0
     lora: LoraSettings | None = None
     firmware_version: str = __version__
+    # RF-55: debe coincidir con `mqtt_topic_evento` del broker (singular).
+    topic_evento: str = "evento"
 
     def topic(self, serial: str, suffix: str) -> str:
         return f"{self.topic_prefix}/{serial}/{suffix}"
@@ -145,6 +147,7 @@ class Settings:
             comando_antiguedad_max_s=_positive_float(env, "EDGE_COMANDO_ANTIGUEDAD_MAX_S", 120.0),
             lora=lora,
             firmware_version=_firmware_version(env),
+            topic_evento=env.get("EDGE_TOPIC_EVENTO", "evento"),
         )
 
 

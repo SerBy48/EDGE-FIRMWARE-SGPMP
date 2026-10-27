@@ -41,6 +41,9 @@ from edge_agent.commands import (
 from edge_agent.config import Settings
 from edge_agent.config_store import ConfigStore, UmbralStore
 from edge_agent.mqtt_client import Connected, Event, Message, PubAck
+from edge_agent.reglas import evento as ev
+from edge_agent.reglas.evaluador import evaluar_simple
+from edge_agent.reglas.evento import EventoEdge
 from edge_agent.reglas.store import ReglaStore
 from edge_agent.sources import DataSource, Reading
 from edge_agent.system import ntp_sincronizado
@@ -54,6 +57,9 @@ _INFLIGHT_TIMEOUT_S = 300
 # Telemetría que sale más tarde que esto respecto de su ventana de
 # transmisión se marca como BUFFER_LOCAL (estuvo retenida por falta de red).
 _GRACIA_TIEMPO_REAL_S = 60
+# El backend rechaza con TIMESTAMP_EXPIRADO un evento BUFFER_LOCAL de más de
+# 72 h: se descarta acá en vez de reintentar contra un rechazo seguro.
+_ANTIGUEDAD_MAX_EVENTO_S = 72 * 3600
 # Comandos que el broker ya despacha (BRK-05) pero que este Edge todavía no
 # implementa (RF-65/RF-66): se rechazan con su propio tipo de ACK para que el
 # broker resuelva la espera como ERROR en vez de agotar el timeout.
@@ -107,6 +113,9 @@ class Agent:
         self._clock = clock
         self._inflight: dict[int, tuple[int, float]] = {}  # mid -> (row_id, enviado_en)
         self._last_reported: dict[str, str] = {}
+        # ERROR_CONFIGURACION ya emitidos, por (regla, id, versión): uno solo
+        # por configuración rota, no uno por lectura.
+        self._errores_reportados: set[tuple[Any, ...]] = set()
         now = clock()
         self._schedules = {
             serial: self._initial_schedule(serial, now) for serial in settings.serials
@@ -320,6 +329,7 @@ class Agent:
 
     def _capture(self, serial: str, due_at: float, now: float) -> None:
         for reading in self._source.read(serial, _utc(now)):
+            # La lectura cruda primero: si el motor de reglas falla, ya está a salvo.
             self._buffer.enqueue(
                 serial=serial,
                 kind=buf.KIND_TELEMETRY,
@@ -328,19 +338,65 @@ class Agent:
                 due_at=due_at,
                 now=now,
             )
+            try:
+                self._evaluar(reading, now)
+            except Exception:
+                # Un fallo de RF-55 nunca puede tumbar la captura ni el servicio.
+                logger.exception("Falló la evaluación RF-55 de %s/%s", serial, reading.variable)
+
+    def _evaluar(self, reading: Reading, now: float) -> None:
+        evento = evaluar_simple(
+            reading,
+            self._umbrales.todos(),
+            ahora=_utc(now),
+            version_firmware=self._settings.firmware_version,
+        )
+        if evento is not None:
+            self._encolar_evento(evento, now)
+
+    def _encolar_evento(self, evento: EventoEdge, now: float) -> None:
+        if evento.clasificacion == ev.ERROR_CONFIGURACION:
+            meta = evento.metadata
+            clave = (
+                meta.get("regla_aplicada"),
+                meta.get("id_umbral_ambiental", meta.get("id_regla_alerta")),
+                meta.get("version_umbral", meta.get("version_regla")),
+            )
+            if clave in self._errores_reportados:
+                return
+            self._errores_reportados.add(clave)
+            logger.warning("RF-55: configuración inutilizable %s", clave)
+        # El serial es el del nodo dueño de la variable primaria, no el del Gateway.
+        self._buffer.enqueue(
+            serial=evento.serial,
+            kind=buf.KIND_EVENTO,
+            topic=self._settings.topic(evento.serial, self._settings.topic_evento),
+            payload=ev.a_payload(evento, estado_conectividad=self._link.connected),
+            due_at=now,  # los eventos no esperan la ventana de transmisión
+            now=now,
+        )
 
     def _flush(self, now: float) -> None:
         if not self._link.connected:
             return
         for row in self._buffer.due(now, _FLUSH_BATCH, exclude=self._sending()):
             payload = row.payload
+            late = now - row.due_at > _GRACIA_TIEMPO_REAL_S
             if row.kind == buf.KIND_TELEMETRY:
-                late = now - row.due_at > _GRACIA_TIEMPO_REAL_S
                 payload = {
                     **payload,
                     "timestamp_envio": _iso(now),
                     "origen": "BUFFER_LOCAL" if late else "TIEMPO_REAL",
                 }
+            elif row.kind == buf.KIND_EVENTO:
+                if _expirado(payload, now):
+                    logger.warning(
+                        "Evento %s con más de 72 h en buffer: se descarta (TIMESTAMP_EXPIRADO)",
+                        payload.get("metadata_edge", {}).get("id_evento"),
+                    )
+                    self._buffer.delete(row.id)
+                    continue
+                payload = {**payload, "origen": ev.BUFFER_LOCAL if late else ev.TIEMPO_REAL}
             mid = self._link.publish(row.topic, json.dumps(payload).encode("utf-8"))
             if mid is None:
                 break
@@ -410,6 +466,14 @@ def _json_object(payload: bytes) -> dict[str, Any] | None:
     except (UnicodeDecodeError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _expirado(evento: dict[str, Any], now: float) -> bool:
+    try:
+        captura = datetime.fromisoformat(evento["timestamp_captura"]).timestamp()
+    except (KeyError, TypeError, ValueError):
+        return False  # que decida el backend
+    return now - captura > _ANTIGUEDAD_MAX_EVENTO_S
 
 
 def _advance(previous: float, period: float, now: float) -> float:
