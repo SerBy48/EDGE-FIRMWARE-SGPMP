@@ -101,7 +101,7 @@ log "Entorno virtual en $PREFIX/venv"
 # COMMIT: desde dónde sigue update.sh. VERSION: version_firmware del heartbeat.
 if git -C "$SRC_DIR" -c safe.directory='*' rev-parse HEAD >"$PREFIX/COMMIT.tmp" 2>/dev/null; then
   mv "$PREFIX/COMMIT.tmp" "$PREFIX/COMMIT"
-  git -C "$SRC_DIR" -c safe.directory='*' describe --tags --match 'v[0-9]*' --always --dirty >"$PREFIX/VERSION"
+  git -C "$SRC_DIR" -c safe.directory='*' describe --tags --always --dirty >"$PREFIX/VERSION"
   log "Versión $(cat "$PREFIX/VERSION")"
 else
   rm -f "$PREFIX/COMMIT.tmp" "$PREFIX/COMMIT" "$PREFIX/VERSION"
@@ -110,28 +110,9 @@ fi
 
 log "Configuración en $CONF_DIR"
 install -d -m 0755 "$CONF_DIR"
-# Secreto LoRa del sitio (protocolo v2, docs/PROTOCOLO_LORA.md §11): raíz de
-# las claves de los nodos. Se genera una sola vez y nunca se pisa, ni al
-# reinstalar con --env: cambiarlo obliga a reflashear todos los nodos.
-secreto_previo=""
-if [[ -f "$ENV_FILE" ]]; then
-  secreto_previo=$(grep -m1 '^EDGE_LORA_SECRETO_SITIO=.' "$ENV_FILE" || true)
-fi
 if [[ -n "$env_src" ]]; then
   # systemd lee EnvironmentFile como root: 0600 alcanza y nadie más la lee.
   install -m 0600 -o root -g root "$env_src" "$ENV_FILE"
-fi
-if ! grep -q '^EDGE_LORA_SECRETO_SITIO=.' "$ENV_FILE"; then
-  if [[ -n "$secreto_previo" ]]; then
-    linea="$secreto_previo"
-    log "Se conserva el secreto LoRa del sitio"
-  else
-    linea="EDGE_LORA_SECRETO_SITIO=$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
-    log "Secreto LoRa del sitio generado: respaldarlo fuera de la Pi (INSTALACION_RASPBERRY.md §9)"
-  fi
-  sed -i '/^EDGE_LORA_SECRETO_SITIO=/d' "$ENV_FILE"
-  printf '\n# Protocolo LoRa v2: raíz de las claves de los nodos. Generado por install.sh,\n# no cambiarlo (obliga a reflashear los nodos). Respaldarlo fuera de la Pi.\n%s\n' \
-    "$linea" >>"$ENV_FILE"
 fi
 if [[ -n "$ca_src" ]]; then
   install -m 0644 -o root -g root "$ca_src" "$CONF_DIR/ca.pem"
@@ -157,7 +138,6 @@ fi
 log "Actualización automática (edge-updater.timer)"
 install -d -m 0755 "$PREFIX/bin"
 install -m 0755 "$SRC_DIR/scripts/update.sh" "$PREFIX/bin/update.sh"
-install -m 0755 "$SRC_DIR/scripts/lora-key.sh" "$PREFIX/bin/lora-key"
 install -m 0644 "$SRC_DIR/release/allowed_signers" "$CONF_DIR/allowed_signers"
 install -m 0644 "$SRC_DIR/systemd/edge-updater.service" /etc/systemd/system/edge-updater.service
 install -m 0644 "$SRC_DIR/systemd/edge-updater.timer" /etc/systemd/system/edge-updater.timer

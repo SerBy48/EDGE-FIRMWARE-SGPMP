@@ -8,8 +8,7 @@ En la Raspberry, con el servicio detenido (la radio es una sola):
     sudo systemctl stop edge-agent
     sudo systemd-run --pipe --wait -p EnvironmentFile=/etc/sgpmp/edge-agent.env \\
         /opt/sgpmp-edge/venv/bin/python -m edge_agent.lora.monitor
-Solo usa las variables EDGE_LORA_* y, para descifrar los nodos v2,
-EDGE_SERIALS y EDGE_LORA_SECRETO_SITIO.
+Solo usa las variables EDGE_LORA_*.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from edge_agent.config import ConfigError, parse_lora_settings
-from edge_agent.lora import keys
 from edge_agent.lora import protocol as p
 from edge_agent.lora.sx1276 import SX1276, Packet, RadioConfig, gpio_reset, open_spi
 
@@ -52,45 +50,19 @@ class NodeStats:
         return note
 
 
-def format_line(
-    packet: Packet,
-    stats: dict[int, NodeStats],
-    net_id: int,
-    claves: dict[int, bytes] | None = None,
-) -> str:
-    """`claves`: node_id -> clave de los nodos v2 (derivadas de EDGE_SERIALS)."""
+def format_line(packet: Packet, stats: dict[int, NodeStats], net_id: int) -> str:
     stamp = datetime.now().strftime("%H:%M:%S")
     signal = f"RSSI {packet.rssi_dbm:6.1f} dBm  SNR {packet.snr_db:5.1f} dB"
     try:
-        if packet.payload[:1] == bytes([p.PROTOCOL_VERSION_V2]):
-            header = p.peek_v2(packet.payload)
-            clave = (claves or {}).get(header.node_id)
-            if header.net_id == net_id and clave is None:
-                return (
-                    f"{stamp}  {signal}  v2 de node_id 0x{header.node_id:04x} sin clave: "
-                    "¿su serial está en EDGE_SERIALS?"
-                )
-            if clave is not None:
-                _, message = p.parse_v2(clave, p.Direccion.SUBIDA, packet.payload)
-            red, node_id, msg_type, seq = (
-                header.net_id,
-                header.node_id,
-                header.msg_type,
-                header.fcnt,
-            )
-            version = "v2"
-        else:
-            frame, message = p.parse(packet.payload)
-            red, node_id, msg_type, seq = frame.net_id, frame.node_id, frame.msg_type, frame.seq
-            version = "v1"
+        frame, message = p.parse(packet.payload)
     except p.FrameError as exc:
         return f"{stamp}  {signal}  INVÁLIDA: {exc}  {packet.payload.hex()}"
-    if red != net_id:
-        return f"{stamp}  {signal}  otra red (net_id=0x{red:02x})"
-    note = stats.setdefault(node_id, NodeStats()).track(seq & 0xFF, packet)
+    if frame.net_id != net_id:
+        return f"{stamp}  {signal}  otra red (net_id=0x{frame.net_id:02x})"
+    note = stats.setdefault(frame.node_id, NodeStats()).track(frame.seq, packet)
     return (
-        f"{stamp}  {signal}  {version} nodo 0x{node_id:04x} seq {seq:3d} "
-        f"{p.MsgType(msg_type).name:<10} {message} {note}"
+        f"{stamp}  {signal}  nodo 0x{frame.node_id:04x} seq {frame.seq:3d} "
+        f"{p.MsgType(frame.msg_type).name:<10} {message} {note}"
     )
 
 
@@ -127,12 +99,6 @@ def main() -> int:
         )
     )
     radio.receive()
-    claves = {
-        node_id: keys.clave_de(lora.secreto_sitio, serial)
-        for node_id, serial in lora.nodos_v2.items()
-    }
-    for node_id, serial in lora.nodos_v2.items():
-        print(f"Nodo v2 0x{node_id:04x} = {serial}, huella {keys.huella(claves[node_id])}")
     print(
         f"Escuchando {lora.freq_hz / 1e6:.3f} MHz SF{lora.sf} BW{lora.bw_hz // 1000}k "
         f"net_id=0x{lora.net_id:02x} — Ctrl+C para terminar"
@@ -144,7 +110,7 @@ def main() -> int:
             if packet is None:
                 time.sleep(0.01)
                 continue
-            print(format_line(packet, stats, lora.net_id, claves), flush=True)
+            print(format_line(packet, stats, lora.net_id), flush=True)
     except KeyboardInterrupt:
         pass
     finally:

@@ -5,7 +5,6 @@ from lora_fakes import FakeSx1276Spi
 
 from edge_agent.config_store import DeviceConfig
 from edge_agent.lora import protocol as p
-from edge_agent.lora.estado import LoraEstado
 from edge_agent.lora.gateway import LoraGateway, LoraVariable
 from edge_agent.lora.sx1276 import SX1276, RadioConfig
 
@@ -123,22 +122,6 @@ def test_config_igual_no_genera_downlink(env):
     assert env.downlinks() == []
 
 
-def test_sensores_se_registran_solo_al_cambiar(env, caplog):
-    caplog.set_level("INFO", logger="edge_agent.lora.gateway")
-    con_sensores = p.Estado(80, 0, 10, 15, 1, 0, 0, p.Sensor.DHT22 | p.Sensor.DS18B20, 0)
-    env.rx(1, 1, con_sensores)
-    env.rx(1, 2, con_sensores)  # sin cambios: no se repite
-    falla = p.Estado(80, 0, 10, 15, 1, 0, 0, p.Sensor.DHT22 | p.Sensor.DS18B20, p.Sensor.DS18B20)
-    env.rx(1, 3, falla)
-    env.rx(1, 4, estado())  # firmware anterior: no borra lo último conocido
-
-    logs = [(r.levelname, r.getMessage()) for r in caplog.records if "sensores" in r.getMessage()]
-    assert logs == [
-        ("INFO", "Nodo 0x0001 sensores detectados: DHT22, DS18B20; fallando: ninguno"),
-        ("WARNING", "Nodo 0x0001 sensores detectados: DHT22, DS18B20; fallando: DS18B20"),
-    ]
-
-
 def test_serial_por_sitio_propaga_a_todos_los_nodos():
     env = Env(nodes={1: "IOT-SITIO", 2: "IOT-SITIO"})
     env.gw.apply_config("IOT-SITIO", DeviceConfig(5, 30))
@@ -187,134 +170,3 @@ def test_hilo_del_gateway_recibe_y_se_detiene():
     finally:
         gw.stop()
     assert not any(t.name == "lora-gateway" for t in threading.enumerate())
-
-
-# --- Protocolo v2 (§11): cifrado, anti-repetición y migración --------------------
-
-CLAVE_A = bytes(range(16))
-CLAVE_B = bytes(range(16, 32))
-NODO_A, NODO_B = 0x0A0A, 0x0B0B
-SUBIDA, BAJADA = p.Direccion.SUBIDA, p.Direccion.BAJADA
-
-
-class EnvV2(Env):
-    def __init__(self, estado_path=None, aceptar_v1=True):
-        self.now = NOW
-        self.spi = FakeSx1276Spi()
-        radio = SX1276(self.spi, sleep=lambda s: None)
-        self.gw = LoraGateway(
-            radio,
-            RadioConfig(freq_hz=915_000_000, tx_power_dbm=14),
-            NET,
-            {1: "IOT-A"},  # el nodo de IOT-A aún tiene firmware v1
-            {1: LoraVariable("temperatura_ambiente", "C")},
-            nodos_v2={NODO_A: ("IOT-A", CLAVE_A), NODO_B: ("IOT-B", CLAVE_B)},
-            aceptar_v1=aceptar_v1,
-            estado=LoraEstado(estado_path),
-            downlink_delay_s=0,
-            clock=lambda: self.now,
-            sleep=lambda s: None,
-        )
-        radio.init(RadioConfig(freq_hz=915_000_000, tx_power_dbm=14))
-        radio.receive()
-        self.radio = radio
-
-    def rx_raw(self, data):
-        self.spi.inject(data, rssi_raw=100)
-        self.gw.handle_packet(self.radio.poll())
-
-    def rx_v2(self, node, fcnt, message, clave=CLAVE_A):
-        data = p.build_v2(clave, SUBIDA, NET, node, fcnt, message)
-        self.rx_raw(data)
-        return data
-
-
-def telemetria(valor=21.5):
-    return p.Telemetria(0, (p.Measurement(1, valor),))
-
-
-def test_v2_telemetria_se_acepta():
-    env = EnvV2()
-    env.rx_v2(NODO_A, 5, telemetria())
-    [lectura] = env.gw.read("IOT-A", env.dt)
-    assert (lectura.variable, lectura.valor_crudo) == ("temperatura_ambiente", 21.5)
-    assert lectura.metadatos["lora"]["seq"] == 5
-
-
-def test_v2_trama_repetida_o_vieja_se_rechaza():
-    env = EnvV2()
-    data = env.rx_v2(NODO_A, 5, telemetria())
-    env.rx_raw(data)  # repetición exacta, MIC válido
-    env.rx_v2(NODO_A, 4, telemetria(99.0))  # fcnt viejo, aunque bien firmado
-    assert len(env.gw.read("IOT-A", env.dt)) == 1
-    assert env.gw._nodes_v2[NODO_A].repetidas == 2
-
-
-def test_v2_mic_invalido_o_clave_ajena_se_rechaza():
-    env = EnvV2()
-    data = bytearray(p.build_v2(CLAVE_A, SUBIDA, NET, NODO_A, 1, telemetria()))
-    data[10] ^= 0x01
-    env.rx_raw(bytes(data))
-    env.rx_v2(NODO_A, 2, telemetria(), clave=CLAVE_B)  # firmada con la clave de otro nodo
-    assert env.gw.read("IOT-A", env.dt) == []
-    assert env.gw._nodes_v2[NODO_A].mic_invalidos == 2
-    # Una trama rechazada no avanza el contador: la legítima siguiente pasa.
-    env.rx_v2(NODO_A, 1, telemetria())
-    assert len(env.gw.read("IOT-A", env.dt)) == 1
-
-
-def test_v1_se_acepta_hasta_que_el_nodo_migra():
-    env = EnvV2()
-    env.rx(1, 1, telemetria())  # firmware v1
-    assert len(env.gw.read("IOT-A", env.dt)) == 1
-
-    env.rx_v2(NODO_A, 1, telemetria())  # reflasheado a v2
-    env.rx(1, 2, telemetria(99.0))  # alguien inyecta v1 con el node_id viejo
-    assert [x.valor_crudo for x in env.gw.read("IOT-A", env.dt)] == [21.5]
-
-
-def test_v1_desactivado():
-    env = EnvV2(aceptar_v1=False)
-    env.rx(1, 1, telemetria())
-    assert env.gw.read("IOT-A", env.dt) == []
-
-
-def test_v2_perdidas_por_fcnt():
-    env = EnvV2()
-    env.rx_v2(NODO_A, 1, telemetria())
-    env.rx_v2(NODO_A, 4, telemetria())  # se perdieron 2
-    env.rx_v2(NODO_A, 2000, telemetria())  # reinicio: salta de bloque, no es pérdida
-    assert env.gw._nodes_v2[NODO_A].perdidas == 2
-
-
-def test_v2_downlink_cifrado_y_con_fcnt_creciente():
-    env = EnvV2()
-    env.gw.apply_config("IOT-B", DeviceConfig(5, 30))
-    env.rx_v2(NODO_B, 1, estado(), clave=CLAVE_B)
-    env.rx_v2(NODO_B, 2, estado(), clave=CLAVE_B)  # el CONFIG anterior se perdió
-    tramas = env.spi.transmitted
-    assert len(tramas) == 2
-    frames = [p.parse_v2(CLAVE_B, BAJADA, t) for t in tramas]
-    assert [f.fcnt for f, _ in frames] == [1, 2]
-    _, config = frames[0]
-    assert (config.frecuencia_captura_min, config.intervalo_transmision_min) == (5, 30)
-    with pytest.raises(p.MicInvalido):
-        p.parse_v2(CLAVE_A, BAJADA, tramas[0])  # otro nodo no puede leerlo
-
-
-def test_v2_contadores_sobreviven_al_reinicio_de_la_pi(tmp_path):
-    path = tmp_path / "lora.json"
-    env = EnvV2(estado_path=path)
-    vieja = env.rx_v2(NODO_A, 7, telemetria())
-    env.gw.apply_config("IOT-B", DeviceConfig(5, 30))
-    env.rx_v2(NODO_B, 1, estado(), clave=CLAVE_B)
-
-    reiniciada = EnvV2(estado_path=path)
-    reiniciada.rx_raw(vieja)  # repetición tras el reinicio
-    assert reiniciada.gw.read("IOT-A", reiniciada.dt) == []
-    reiniciada.rx(1, 1, telemetria())  # IOT-A ya migró: su v1 sigue rechazado
-    assert reiniciada.gw.read("IOT-A", reiniciada.dt) == []
-    reiniciada.gw.apply_config("IOT-B", DeviceConfig(5, 30))
-    reiniciada.rx_v2(NODO_B, 2, estado(), clave=CLAVE_B)
-    [(frame, _)] = [p.parse_v2(CLAVE_B, BAJADA, t) for t in reiniciada.spi.transmitted]
-    assert frame.fcnt == 2  # nunca repite el nonce de bajada
