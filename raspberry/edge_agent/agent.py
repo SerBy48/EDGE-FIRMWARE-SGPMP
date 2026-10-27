@@ -195,6 +195,12 @@ class Agent:
                     self._send_heartbeat(serial, now)
         self._report_sync_finished(now)
 
+    def capturar_ahora(self, serial: str, now: float) -> None:
+        """Captura fuera de agenda y vacía el buffer: la usa el inyector de QA
+        (`scripts/inyectar_lecturas.py`) para ejercitar RF-55 sin esperar ventanas."""
+        self._capture(serial, now, now)
+        self._flush(now)
+
     # --- comandos -------------------------------------------------------
 
     def _on_command(self, topic: str, payload: bytes, now: float) -> None:
