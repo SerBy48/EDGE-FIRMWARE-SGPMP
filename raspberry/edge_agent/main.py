@@ -19,6 +19,7 @@ from edge_agent.buffer import Buffer
 from edge_agent.config import ConfigError, Settings
 from edge_agent.config_store import ConfigStore, DeviceConfig, UmbralStore
 from edge_agent.mqtt_client import Event, MqttLink
+from edge_agent.reglas import perfil
 from edge_agent.reglas.store import ReglaStore
 from edge_agent.sources import DataSource, FakeLoraSource
 from edge_agent.systemd import SystemdNotifier
@@ -68,7 +69,13 @@ def build(settings: Settings) -> Runtime:
     umbrales = UmbralStore(settings.state_path.with_name("umbrales.json"))
     # RF-55: reglas de alerta, también en el directorio de estado (archivo propio).
     reglas = ReglaStore(settings.state_path.with_name("reglas.json"))
-    agent = Agent(settings, link, store, buffer, source, umbrales=umbrales, reglas=reglas)
+    # RF-55.2 solo si el hardware alcanza; nunca impide el arranque.
+    rf55 = perfil.verificar(
+        settings.state_path.parent, forzar_deshabilitado=settings.rf55_2_deshabilitar
+    )
+    agent = Agent(
+        settings, link, store, buffer, source, umbrales=umbrales, reglas=reglas, rf55=rf55
+    )
     return Runtime(settings, events, link, buffer, store, agent, source)
 
 

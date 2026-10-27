@@ -44,6 +44,7 @@ from edge_agent.mqtt_client import Connected, Event, Message, PubAck
 from edge_agent.reglas import evento as ev
 from edge_agent.reglas.evaluador import evaluar_lote
 from edge_agent.reglas.evento import EventoEdge
+from edge_agent.reglas.perfil import Habilitacion
 from edge_agent.reglas.store import ReglaStore
 from edge_agent.reglas.ventana import EstadoCompuestas
 from edge_agent.sources import DataSource, Reading
@@ -95,6 +96,7 @@ class Agent:
         *,
         umbrales: UmbralStore,
         reglas: ReglaStore,
+        rf55: Habilitacion | None = None,
         reloj_sincronizado: Callable[[], bool] = ntp_sincronizado,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -117,8 +119,10 @@ class Agent:
         # ERROR_CONFIGURACION ya emitidos, por (regla, id, versión): uno solo
         # por configuración rota, no uno por lectura.
         self._errores_reportados: set[tuple[Any, ...]] = set()
-        # RF-55.2: ventana de correlación y confirmaciones (en memoria).
-        self._compuestas: EstadoCompuestas | None = EstadoCompuestas()
+        # RF-55.2 (opcional según el perfil de hardware): ventana de
+        # correlación y confirmaciones, en memoria. None: solo RF-55.1.
+        self._rf55 = rf55 or Habilitacion(True, ())
+        self._compuestas = EstadoCompuestas() if self._rf55.rf55_2 else None
         now = clock()
         self._schedules = {
             serial: self._initial_schedule(serial, now) for serial in settings.serials
@@ -438,6 +442,11 @@ class Agent:
             "fecha_registro": _iso(now),
         }
         payload.update({k: v for k, v in self._source.status(serial).items() if v is not None})
+        # RF-55.2 activo o no, por el campo de D11 que el broker ya acepta.
+        payload["sensores_operativos"] = [
+            *payload.get("sensores_operativos", []),
+            self._rf55.sensor_operativo(),
+        ]
         topic = self._settings.topic(serial, self._settings.topic_heartbeat)
         if self._link.publish(topic, json.dumps(payload).encode("utf-8")) is not None:
             self._last_reported[serial] = estado

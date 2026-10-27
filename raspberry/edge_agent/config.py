@@ -96,6 +96,8 @@ class Settings:
     # RF-55.2: nombre canónico de las reglas → `variable` de la telemetría.
     # Amplía o corrige `reglas.formulas.VARIABLES_DEFECTO`.
     rf55_variables: dict[str, str] = field(default_factory=dict)
+    # Fuerza RF-55.2 apagado aunque el hardware alcance (pruebas).
+    rf55_2_deshabilitar: bool = False
 
     def topic(self, serial: str, suffix: str) -> str:
         return f"{self.topic_prefix}/{serial}/{suffix}"
@@ -152,6 +154,7 @@ class Settings:
             firmware_version=_firmware_version(env),
             topic_evento=env.get("EDGE_TOPIC_EVENTO", "evento"),
             rf55_variables=_parse_rf55_variables(env.get("EDGE_RF55_VARIABLES", "")),
+            rf55_2_deshabilitar=_int_in(env, "EDGE_RF55_2_DESHABILITAR", "0", 0, 1) == 1,
         )
 
 
