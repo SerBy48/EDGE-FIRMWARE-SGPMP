@@ -1,4 +1,4 @@
-"""Buffer local persistente (outbox) para telemetría y ACKs.
+"""Buffer local persistente (outbox) para telemetría, eventos Edge (RF-55) y ACKs.
 
 Todo lo que debe llegar al broker pasa por acá antes de publicarse, y la fila
 se borra recién con el PUBACK. Así nada se pierde si se cae la red o se
@@ -8,6 +8,8 @@ reinicia la Raspberry. Los heartbeats NO pasan por el buffer (plan, 2.1).
 - INACTIVO: nada pendiente de transmitir.
 - ACTIVO:   hay filas cuya hora de transmisión ya pasó y no tienen PUBACK.
 - LLENO:    se alcanzó `max_rows`; se descarta la telemetría más vieja.
+            Nunca un ACK ni un evento: un evento clasificado vale más que una
+            muestra cruda.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 KIND_TELEMETRY = "telemetry"
 KIND_ACK = "ack"
+KIND_EVENTO = "evento"
 
 ESTADO_INACTIVO = "INACTIVO"
 ESTADO_ACTIVO = "ACTIVO"
@@ -139,7 +142,7 @@ class Buffer:
         excess = self.total() - self._max_rows
         if excess <= 0:
             return
-        # Nunca se descarta un ACK: si solo quedan ACKs, se tolera el exceso.
+        # Nunca se descarta un ACK ni un evento: si solo quedan esos, se tolera el exceso.
         cur = self._db.execute(
             "DELETE FROM outbox WHERE id IN ("
             "  SELECT id FROM outbox WHERE kind = ? ORDER BY created_at, id LIMIT ?"

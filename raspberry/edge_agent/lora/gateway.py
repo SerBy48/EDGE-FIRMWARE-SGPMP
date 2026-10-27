@@ -18,7 +18,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from edge_agent.config_store import DeviceConfig
+from edge_agent.lora import keys
 from edge_agent.lora import protocol as p
+from edge_agent.lora.estado import LoraEstado
 from edge_agent.lora.sx1276 import SX1276, Packet, RadioConfig, RadioError
 from edge_agent.sources import Reading
 
@@ -56,8 +58,12 @@ class _Node:
     snr_db: float | None = None
     bateria_pct: int | None = None
     reported: tuple[int, int] | None = None  # (frecuencia, intervalo) del último ESTADO
+    sensores: tuple[int, int] | None = None  # (detectados, fallando) del último ESTADO
     downlink_seq: int = 0
     desired: _Desired | None = None
+    clave: bytes | None = None  # v2; None = nodo v1 (EDGE_LORA_NODES)
+    mic_invalidos: int = 0
+    repetidas: int = 0
 
 
 class LoraGateway:
@@ -69,11 +75,17 @@ class LoraGateway:
         nodes: dict[int, str],
         variables: dict[int, LoraVariable],
         *,
+        nodos_v2: dict[int, tuple[str, bytes]] | None = None,
+        aceptar_v1: bool = True,
+        estado: LoraEstado | None = None,
         downlink_delay_s: float = 0.05,
         poll_interval_s: float = 0.01,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        """`nodes`: nodos v1 (node_id -> serial). `nodos_v2`: node_id derivado ->
+        (serial, clave), ver lora/keys.py. Un mismo serial puede estar en ambos
+        mientras su nodo migra."""
         self._radio = radio
         self._radio_config = radio_config
         self._net_id = net_id
@@ -82,9 +94,15 @@ class LoraGateway:
         self._poll_interval_s = poll_interval_s
         self._clock = clock
         self._sleep = sleep
+        self._aceptar_v1 = aceptar_v1
+        self._estado = estado if estado is not None else LoraEstado(None)
         self._nodes = {nid: _Node(nid, serial) for nid, serial in nodes.items()}
+        self._nodes_v2 = {
+            nid: _Node(nid, serial, clave=clave)
+            for nid, (serial, clave) in (nodos_v2 or {}).items()
+        }
         self._by_serial: dict[str, list[_Node]] = defaultdict(list)
-        for node in self._nodes.values():
+        for node in [*self._nodes.values(), *self._nodes_v2.values()]:
             self._by_serial[node.serial].append(node)
         self._readings: dict[str, list[Reading]] = defaultdict(list)
         self._lock = threading.Lock()
@@ -101,12 +119,22 @@ class LoraGateway:
         self._thread = threading.Thread(target=self._run, name="lora-gateway", daemon=True)
         self._thread.start()
         logger.info(
-            "Gateway LoRa escuchando en %.3f MHz SF%d (net_id=0x%02x, %d nodos)",
+            "Gateway LoRa escuchando en %.3f MHz SF%d (net_id=0x%02x, %d nodos v2, %d nodos v1%s)",
             self._radio_config.freq_hz / 1e6,
             self._radio_config.sf,
             self._net_id,
+            len(self._nodes_v2),
             len(self._nodes),
+            "" if self._aceptar_v1 else ", v1 desactivado",
         )
+        for node in self._nodes_v2.values():
+            # La huella permite comparar con la que muestra el nodo al arrancar.
+            logger.info(
+                "Nodo v2 0x%04x = %s, huella de clave %s",
+                node.node_id,
+                node.serial,
+                keys.huella(node.clave),
+            )
 
     def stop(self) -> None:
         self._stop.set()
@@ -137,6 +165,13 @@ class LoraGateway:
     # --- recepción (hilo LoRa) ------------------------------------------
 
     def handle_packet(self, packet: Packet) -> None:
+        data = packet.payload
+        if data[:1] == bytes([p.PROTOCOL_VERSION_V2]):
+            self._handle_v2(packet)
+        else:
+            self._handle_v1(packet)
+
+    def _handle_v1(self, packet: Packet) -> None:
         now = self._clock()
         try:
             frame, message = p.parse(packet.payload)
@@ -150,19 +185,91 @@ class LoraGateway:
         node = self._nodes.get(frame.node_id)
         if node is None:
             self.descartadas += 1
-            logger.info("Trama de node_id no configurado: 0x%04x", frame.node_id)
+            logger.info("Trama v1 de node_id no configurado: 0x%04x", frame.node_id)
+            return
+        # Anti-degradación: un nodo que ya habló v2 no vuelve a v1, y con v1
+        # desactivado no se acepta ninguno. Una trama v1 así es sospechosa.
+        if not self._aceptar_v1 or self._estado.migrado(node.serial):
+            self.descartadas += 1
+            logger.warning(
+                "Trama v1 rechazada del nodo 0x%04x (%s): %s",
+                node.node_id,
+                node.serial,
+                "ya usa v2" if self._aceptar_v1 else "v1 desactivado",
+            )
             return
 
         with self._lock:
             if not self._track_seq(node, frame.seq):
                 return
-            node.last_seen = now
-            node.rssi_dbm = packet.rssi_dbm
-            node.snr_db = packet.snr_db
-            downlink = self._dispatch(node, frame, message, now)
+            downlink = self._accept(node, packet, frame.seq, message, now)
 
         if downlink is not None:
             self._send_downlink(node, downlink)
+
+    def _handle_v2(self, packet: Packet) -> None:
+        """Orden de PROTOCOLO_LORA.md §11: cabecera, nodo, fcnt, MIC; solo entonces se procesa."""
+        now = self._clock()
+        try:
+            header = p.peek_v2(packet.payload)
+        except p.FrameError as exc:
+            self.descartadas += 1
+            logger.debug("Trama v2 descartada: %s (%s)", exc, packet.payload.hex())
+            return
+        if header.net_id != self._net_id:
+            self.descartadas += 1
+            return
+        node = self._nodes_v2.get(header.node_id)
+        if node is None:
+            self.descartadas += 1
+            logger.info("Trama v2 de node_id no configurado: 0x%04x", header.node_id)
+            return
+        ultimo = self._estado.ultimo_fcnt(node.serial)
+        if ultimo is not None and header.fcnt <= ultimo:
+            self.descartadas += 1
+            node.repetidas += 1
+            logger.warning(
+                "Nodo 0x%04x: trama repetida o vieja (fcnt %d, último %d)",
+                node.node_id,
+                header.fcnt,
+                ultimo,
+            )
+            return
+        try:
+            _, message = p.parse_v2(node.clave, p.Direccion.SUBIDA, packet.payload)
+        except p.MicInvalido:
+            self.descartadas += 1
+            node.mic_invalidos += 1
+            logger.warning(
+                "Nodo 0x%04x (%s): MIC inválido (%d en total): clave distinta o trama alterada",
+                node.node_id,
+                node.serial,
+                node.mic_invalidos,
+            )
+            return
+        except p.FrameError as exc:
+            self.descartadas += 1
+            logger.warning("Nodo 0x%04x: payload v2 inválido: %s", node.node_id, exc)
+            return
+
+        self._estado.aceptar_fcnt(node.serial, header.fcnt)  # en disco antes de procesar
+        with self._lock:
+            # Un salto grande es un reinicio del nodo (salta al siguiente bloque
+            # de contadores), no pérdida.
+            if ultimo is not None and header.fcnt - ultimo - 1 < 256:
+                node.perdidas += header.fcnt - ultimo - 1
+            downlink = self._accept(node, packet, header.fcnt, message, now)
+
+        if downlink is not None:
+            self._send_downlink(node, downlink)
+
+    def _accept(
+        self, node: _Node, packet: Packet, seq: int, message: p.Message, now: float
+    ) -> p.ConfigDownlink | None:
+        node.last_seen = now
+        node.rssi_dbm = packet.rssi_dbm
+        node.snr_db = packet.snr_db
+        return self._dispatch(node, seq, message, now)
 
     def _track_seq(self, node: _Node, seq: int) -> bool:
         if node.last_seq is not None:
@@ -177,11 +284,11 @@ class LoraGateway:
         return True
 
     def _dispatch(
-        self, node: _Node, frame: p.Frame, message: p.Message, now: float
+        self, node: _Node, seq: int, message: p.Message, now: float
     ) -> p.ConfigDownlink | None:
         match message:
             case p.Telemetria():
-                self._store_telemetry(node, frame, message, now)
+                self._store_telemetry(node, seq, message, now)
             case p.Estado():
                 node.bateria_pct = message.bateria_pct
                 node.reported = (message.frecuencia_captura_min, message.intervalo_transmision_min)
@@ -192,6 +299,7 @@ class LoraGateway:
                         message.fw_major,
                         message.fw_minor,
                     )
+                self._track_sensores(node, message)
                 desired = node.desired
                 if desired is not None and not desired.matches(*node.reported):
                     return p.ConfigDownlink(
@@ -217,13 +325,28 @@ class LoraGateway:
                 logger.info("Nodo 0x%04x envió un tipo solo-downlink: %s", node.node_id, message)
         return None
 
-    def _store_telemetry(
-        self, node: _Node, frame: p.Frame, message: p.Telemetria, now: float
-    ) -> None:
+    def _track_sensores(self, node: _Node, message: p.Estado) -> None:
+        """Registra en el log solo los cambios: un sensor que aparece, se desconecta o falla."""
+        if message.sensores_detectados is None:
+            return  # firmware anterior: no informa sensores
+        sensores = (message.sensores_detectados, message.sensores_fallando or 0)
+        if sensores == node.sensores:
+            return
+        node.sensores = sensores
+        detectados, fallando = sensores
+        log = logger.warning if fallando else logger.info
+        log(
+            "Nodo 0x%04x sensores detectados: %s; fallando: %s",
+            node.node_id,
+            p.Sensor.describe(detectados),
+            p.Sensor.describe(fallando),
+        )
+
+    def _store_telemetry(self, node: _Node, seq: int, message: p.Telemetria, now: float) -> None:
         captured = datetime.fromtimestamp(now - message.age_s, UTC)
         lora_meta = {
             "node_id": node.node_id,
-            "seq": frame.seq,
+            "seq": seq,
             "rssi": node.rssi_dbm,
             "snr": node.snr_db,
             "perdidas": node.perdidas,
@@ -255,8 +378,15 @@ class LoraGateway:
         # El nodo abre su ventana RX al terminar el ESTADO; se le da un
         # margen para que su radio pase de TX a RX.
         self._sleep(self._downlink_delay_s)
-        node.downlink_seq = (node.downlink_seq + 1) % 256
-        data = p.build(self._net_id, node.node_id, node.downlink_seq, message)
+        if node.clave is not None:
+            # El fcnt queda en disco antes de transmitir: un reinicio nunca repite nonce.
+            fcnt = self._estado.siguiente_bajada(node.serial)
+            data = p.build_v2(
+                node.clave, p.Direccion.BAJADA, self._net_id, node.node_id, fcnt, message
+            )
+        else:
+            node.downlink_seq = (node.downlink_seq + 1) % 256
+            data = p.build(self._net_id, node.node_id, node.downlink_seq, message)
         try:
             self._radio.transmit(data)
             logger.info("CONFIG v%d enviado a nodo 0x%04x", message.cfg_version, node.node_id)

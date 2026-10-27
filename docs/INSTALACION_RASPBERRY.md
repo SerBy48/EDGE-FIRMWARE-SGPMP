@@ -187,7 +187,9 @@ El instalador (tarda 3–6 minutos en una Pi 3):
    grupos `spi` y `gpio`.
 4. Copia el código a `/opt/sgpmp-edge/app`, crea el entorno virtual en
    `/opt/sgpmp-edge/venv` y anota la versión instalada en
-   `/opt/sgpmp-edge/VERSION` (es la `version_firmware` del heartbeat).
+   `/opt/sgpmp-edge/VERSION` (`git describe`; el agente la manda en
+   `version_firmware` del heartbeat normalizada a SemVer, ver
+   `docs/RELEASES.md` §2).
 5. Copia la configuración a `/etc/sgpmp/edge-agent.env` (0600, root).
 6. **Valida la configuración** (`--check-config`). Si hay un error, se
    detiene sin arrancar nada y muestra qué variable falta o es inválida.
@@ -319,22 +321,27 @@ Cambiar `EDGE_SOURCE=lora` y agregar:
 EDGE_LORA_FREQ_HZ=<frecuencia confirmada, ej. 915000000>
 EDGE_LORA_TX_POWER_DBM=<potencia confirmada>
 EDGE_LORA_NET_ID=0x01
-EDGE_LORA_NODES=1=TC-M09-G64-1789321890010
-EDGE_LORA_VARIABLES=1=temperatura_ambiente:C;2=humedad_relativa:%;3=<variable del DS18B20>:C
+EDGE_LORA_VARIABLES=1=temperatura_ambiente:C;2=humedad_relativa:%;3=<nombre>:C;4=<nombre>:g;5=<nombre>:g;6=<nombre>:deg;7=<nombre>:deg;8=<nombre>:BPM;9=<nombre>:%
 EDGE_LORA_RESET_GPIO=25
 ```
 
-Con el nodo actual (NodeMCU + DHT22 + DS18B20, `esp32/README.md`): `1` y
-`2` son la temperatura y la humedad del DHT22, y `3` la temperatura del
-DS18B20. `<variable del DS18B20>` debe ser el nombre con que esa variable
-existe en la BD.
-
-- `EDGE_LORA_NODES`: `node_id=serial` por cada ESP32, con el serial que se
-  registró en la plataforma bajo este Gateway Edge. Todos van en
-  `EDGE_SERIALS`. El serial del Edge no lleva nodo: publica su propio
-  heartbeat aunque no haya ESP32 escuchándose.
-- `EDGE_LORA_VARIABLES`: `code=nombre:unidad`. Los codes deben coincidir
-  con los del firmware (`SENSOR_CODE_*`).
+- **Nodos:** cada nodo sensor es un serial de `EDGE_SERIALS`, el mismo con
+  que se registró en la plataforma y se asignó a este Gateway Edge. No hay
+  que mapear números: la Pi deriva el `node_id` y la clave de cada nodo a
+  partir de su serial (`PROTOCOLO_LORA.md` §11).
+- **Secreto del sitio:** `install.sh` agregó `EDGE_LORA_SECRETO_SITIO` al
+  final del archivo. No escribirlo a mano ni cambiarlo: cambiarlo obliga a
+  reflashear todos los nodos. **Copiarlo a un lugar seguro fuera de la Pi**:
+  con él, una Pi de reemplazo deriva las mismas claves y los nodos siguen
+  funcionando sin reflashear.
+- `EDGE_LORA_VARIABLES`: `code=nombre:unidad`. Los codes son los del
+  catálogo de sensores del firmware (`esp32/README.md`, "Codes de
+  variable"): 1–2 DHT22, 3 DS18B20, 4–7 MPU6050, 8–9 MAX30102. Cada
+  `<nombre>` es el nombre con que esa variable existe en la BD. Basta con
+  mapear los de los sensores que tienen los nodos del sitio.
+- **Nodos con firmware v1** (antes de la v0.3 del firmware): mientras se
+  reflashean, se siguen aceptando con `EDGE_LORA_NODES=1=<serial>`. Cuando
+  todos usan v2, poner `EDGE_LORA_ACEPTAR_V1=0` y borrar `EDGE_LORA_NODES`.
 
 Validar antes de reiniciar:
 
@@ -343,7 +350,29 @@ sudo systemd-run --pipe --wait -p EnvironmentFile=/etc/sgpmp/edge-agent.env \
     /opt/sgpmp-edge/venv/bin/python -m edge_agent --check-config
 ```
 
-### 9.3 Probar el enlace con el monitor
+### 9.3 Dar de alta un nodo sensor
+
+1. Registrar el nodo en la plataforma y asignarlo a este Gateway Edge.
+2. En la Pi, agregar su serial a `EDGE_SERIALS` en
+   `/etc/sgpmp/edge-agent.env`.
+3. En la Pi, obtener el archivo con la identidad y la clave del nodo:
+
+   ```bash
+   sudo /opt/sgpmp-edge/bin/lora-key <serial del nodo>
+   ```
+
+   Copiar todo lo que imprime a `esp32/secrets.ini` en el PC que flashea
+   (está en `.gitignore`: nunca se sube al repositorio) y flashear el nodo
+   (`esp32/README.md`). Un archivo por nodo: al flashear el siguiente,
+   reemplazarlo con el suyo.
+4. Reiniciar el servicio: `sudo systemctl restart edge-agent`.
+5. Comparar huellas: el monitor serie del nodo muestra
+   `[lora] huella de clave xxxxxxxx` y el log de la Pi
+   `Nodo v2 0x.... = <serial>, huella de clave xxxxxxxx`. Si coinciden, la
+   clave es la misma. Si la Pi registra `MIC inválido` para ese nodo, la
+   clave no coincide: volver a generar `secrets.ini` y reflashear.
+
+### 9.4 Probar el enlace con el monitor
 
 ```bash
 sudo systemctl stop edge-agent
@@ -351,21 +380,22 @@ sudo systemd-run --pipe --wait -p EnvironmentFile=/etc/sgpmp/edge-agent.env \
     /opt/sgpmp-edge/venv/bin/python -m edge_agent.lora.monitor
 ```
 
-Encender el ESP32: al arrancar transmite enseguida. Deben aparecer líneas
-`nodo 0x0001 … TELEMETRIA` y `ESTADO` con RSSI/SNR. `Ctrl+C` muestra el
+Encender el nodo: al arrancar transmite enseguida. Deben aparecer líneas
+`v2 nodo 0x.... … TELEMETRIA` y `ESTADO` con RSSI/SNR. `Ctrl+C` muestra el
 resumen de pérdidas. Si aparece `SX1276 no responde por SPI`, revisar el
 cableado (sección 3) y que exista `/dev/spidev0.0`.
 
-### 9.4 Arrancar con LoRa
+### 9.5 Arrancar con LoRa
 
 ```bash
 sudo systemctl start edge-agent
 journalctl -u edge-agent -f
 ```
 
-Esperado: `Gateway LoRa escuchando en 915.000 MHz SF9 (net_id=0x01, N nodos)`.
-Un cambio de config desde la UI produce `CONFIG vN enviado a nodo 0x0001` en
-la próxima ventana del nodo y luego `Nodo 0x0001 aplicó config vN`.
+Esperado: `Gateway LoRa escuchando en 915.000 MHz SF9 (net_id=0x01, N nodos
+v2, M nodos v1)`, una línea `Nodo v2 …` por nodo con su huella, y luego las
+tramas. Un cambio de config desde la UI produce `CONFIG vN enviado a nodo
+0x....` en la próxima ventana del nodo y luego `Nodo 0x.... aplicó config vN`.
 
 Las pruebas completas con hardware están en `docs/PRUEBAS_CAMPO.md`.
 
@@ -450,6 +480,11 @@ Después, la automática sigue desde lo que se instaló a mano.
 | `SX1276 no responde por SPI (RegVersion=0x00)` | Cableado, alimentación o SPI deshabilitado | Revisar la tabla de la sección 3, `ls /dev/spidev0.*`, reiniciar |
 | El monitor no ve tramas | Frecuencia, SF, sync word o `NET_ID` distintos a los del nodo | Igualar `EDGE_LORA_*` con los `build_flags` del ESP32 |
 | `code de variable N sin mapear` | Falta ese code en `EDGE_LORA_VARIABLES` | Agregarlo y reiniciar el servicio |
+| `Nodo 0x....: MIC inválido` | El nodo se flasheó con otra clave (otro `secrets.ini`, o se cambió el secreto del sitio), o alguien inyecta tramas | Comparar huellas (§9.3); regenerar `secrets.ini` con `lora-key` y reflashear |
+| `Trama v2 de node_id no configurado` | El serial del nodo no está en `EDGE_SERIALS` | Agregarlo y reiniciar el servicio |
+| `trama repetida o vieja` | Una repetición (posible ataque) o se borró la flash del nodo y su contador volvió a 0 | Si persiste tras un reflasheo con borrado, detener el servicio, quitar ese serial de `/var/lib/sgpmp-edge/lora.json` y arrancar |
+| `Trama v1 rechazada … ya usa v2` | Llegó una trama sin cifrar con el `node_id` viejo de un nodo ya migrado | Ninguna si el nodo ya tiene v2; si se repite, alguien intenta degradar el enlace |
+| `EDGE_SERIALS: … dan el mismo node_id` | Dos seriales del sitio chocan en el `node_id` derivado (muy poco probable) | Cambiar el serial de uno de los dos en la plataforma |
 | `edge-updater`: `Repository not found`, `Authentication failed` o `Permission denied (publickey)` | El repo es privado y la Pi no tiene clave de deploy, o la clave fue borrada en GitHub | Instalar la clave: `install.sh --deploy-key` (`docs/RELEASES.md` §4) |
 | `edge-updater`: `vX.Y.Z no tiene una firma de …` | Firma activada (`EDGE_UPDATE_REQUIRE_SIGNATURE=1`) y el tag no está firmado por una clave de `allowed_signers` | Firmar el tag con una clave autorizada (`docs/RELEASES.md` §5) |
 | `edge-updater`: `no desciende de lo instalado` | Se instaló a mano un commit que no está en `main` (ej. `develop` adelantado) | Normal: se actualiza cuando un release incluya ese commit; o instalar a mano el release |

@@ -19,6 +19,8 @@ from edge_agent.buffer import Buffer
 from edge_agent.config import ConfigError, Settings
 from edge_agent.config_store import ConfigStore, DeviceConfig, UmbralStore
 from edge_agent.mqtt_client import Event, MqttLink
+from edge_agent.reglas import perfil
+from edge_agent.reglas.store import ReglaStore
 from edge_agent.sources import DataSource, FakeLoraSource
 from edge_agent.systemd import SystemdNotifier
 
@@ -65,7 +67,15 @@ def build(settings: Settings) -> Runtime:
     source = _build_source(settings)
     # RF-17: los umbrales viven junto a la config, en el mismo directorio de estado.
     umbrales = UmbralStore(settings.state_path.with_name("umbrales.json"))
-    agent = Agent(settings, link, store, buffer, source, umbrales=umbrales)
+    # RF-55: reglas de alerta, también en el directorio de estado (archivo propio).
+    reglas = ReglaStore(settings.state_path.with_name("reglas.json"))
+    # RF-55.2 solo si el hardware alcanza; nunca impide el arranque.
+    rf55 = perfil.verificar(
+        settings.state_path.parent, forzar_deshabilitado=settings.rf55_2_deshabilitar
+    )
+    agent = Agent(
+        settings, link, store, buffer, source, umbrales=umbrales, reglas=reglas, rf55=rf55
+    )
     return Runtime(settings, events, link, buffer, store, agent, source)
 
 
@@ -73,10 +83,16 @@ def _build_source(settings: Settings) -> DataSource:
     if settings.lora is None:
         return FakeLoraSource(settings.fake_variables)
     # Import diferido: spidev/gpiozero solo existen en la Raspberry.
+    from edge_agent.lora import keys
+    from edge_agent.lora.estado import LoraEstado
     from edge_agent.lora.gateway import LoraGateway, LoraVariable
     from edge_agent.lora.sx1276 import SX1276, RadioConfig, gpio_reset, open_spi
 
     lora = settings.lora
+    nodos_v2 = {
+        node_id: (serial, keys.clave_de(lora.secreto_sitio, serial))
+        for node_id, serial in lora.nodos_v2.items()
+    }
     reset = gpio_reset(lora.reset_gpio) if lora.reset_gpio is not None else None
     radio = SX1276(open_spi(lora.spi_bus, lora.spi_device), reset=reset)
     return LoraGateway(
@@ -92,6 +108,10 @@ def _build_source(settings: Settings) -> DataSource:
         lora.net_id,
         lora.nodes,
         {code: LoraVariable(*var) for code, var in lora.variables.items()},
+        nodos_v2=nodos_v2,
+        aceptar_v1=lora.aceptar_v1,
+        # Contadores anti-repetición: junto a la config, en el mismo directorio de estado.
+        estado=LoraEstado(settings.state_path.with_name("lora.json")),
         downlink_delay_s=lora.downlink_delay_ms / 1000,
     )
 

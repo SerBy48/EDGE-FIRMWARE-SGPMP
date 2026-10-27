@@ -59,11 +59,39 @@ def test_version_firmware_del_archivo_version(tmp_path):
     version = tmp_path / "VERSION"
     version.write_text("v0.2.0-3-gabc1234\n")
     s = Settings.from_env({**BASE_ENV, "EDGE_VERSION_FILE": str(version)})
-    assert s.firmware_version == "v0.2.0-3-gabc1234"
+    assert s.firmware_version == "v0.2.0+3.gabc1234"
 
 
 def test_version_firmware_sin_archivo_usa_la_del_paquete(tmp_path):
     from edge_agent import __version__
 
     s = Settings.from_env({**BASE_ENV, "EDGE_VERSION_FILE": str(tmp_path / "no-existe")})
-    assert s.firmware_version == __version__
+    assert s.firmware_version == f"v{__version__}"
+
+
+@pytest.mark.parametrize(
+    ("describe", "esperada"),
+    [
+        ("v0.2.0", "v0.2.0"),
+        ("v0.2.0-rc.1", "v0.2.0-rc.1"),
+        ("v0.2.0-3-gabc1234", "v0.2.0+3.gabc1234"),
+        ("v0.2.0-rc.1-3-gabc1234", "v0.2.0-rc.1+3.gabc1234"),
+        ("v0.2.0-dirty", "v0.2.0+dirty"),
+        ("v0.2.0-3-gabc1234-dirty", "v0.2.0+3.gabc1234.dirty"),
+        ("v0.2.0-rc.1-dirty", "v0.2.0-rc.1+dirty"),
+        # Sin tag alcanzable `--always` devuelve solo el hash.
+        ("f889231", "v{v}+gf889231"),
+        ("f889231-dirty", "v{v}+gf889231.dirty"),
+        ("", "v{v}"),
+        # Lo que no se reconoce va tal cual: el backend lo marca no comparable.
+        ("experimental", "experimental"),
+        ("release-2-gabc1234", "release-2-gabc1234"),
+    ],
+)
+def test_version_firmware_semver(tmp_path, describe, esperada):
+    from edge_agent import __version__
+
+    version = tmp_path / "VERSION"
+    version.write_text(describe + "\n")
+    s = Settings.from_env({**BASE_ENV, "EDGE_VERSION_FILE": str(version)})
+    assert s.firmware_version == esperada.format(v=__version__)
