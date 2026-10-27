@@ -31,6 +31,7 @@ revisión.
 | Fase 1 — firmware nodo sensor | Implementado para ESP8266 (catálogo DHT22, DS18B20, MPU6050, MAX30102; protocolo v2) y ESP32 (simulado) | Compila (`pio run`), tests del codec; DHT22 y DS18B20 en hardware | MPU6050, MAX30102 y v2 en hardware; nombres en BD de los codes 3–9 |
 | Fase 2 — gateway LoRa en la RPi | Implementado | Tests contra un SX1276 simulado a nivel de registros | Hardware real |
 | Fase 3 — pruebas de campo | Protocolo escrito (`PRUEBAS_CAMPO.md`) + monitor de enlace | — | Ejecutarlo |
+| RF-55 — motor de reglas Edge | RF-55.1 (umbrales RF-17) y RF-55.2 (Tipo A ventana de confirmación, Tipo B `ESTRES_TERMICO`), comando `REGLA_COMPUESTA`/`ACK_REGLA`, evento en `sgpmp/<serial>/evento` con buffer offline, perfil de hardware (2026-10-27) | Tests unitarios y extremo a extremo con el inyector de QA (`CONTRATO_EVENTO_EDGE.md` §7) | Merge a `main` después del broker y del `BE-0` del backend; casos con hardware (E2E-9/10 de `PRUEBAS_CAMPO.md`) |
 
 ## 0. Decisión de arquitectura ya tomada
 

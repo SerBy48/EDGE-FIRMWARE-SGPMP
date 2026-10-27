@@ -1,4 +1,4 @@
-from edge_agent.buffer import KIND_ACK, KIND_TELEMETRY, Buffer
+from edge_agent.buffer import KIND_ACK, KIND_EVENTO, KIND_TELEMETRY, Buffer
 
 
 def put(buf: Buffer, kind=KIND_TELEMETRY, due_at=0.0, now=0.0, serial="A") -> int:
@@ -57,4 +57,19 @@ def test_lleno_descarta_telemetria_vieja_nunca_acks(tmp_path):
     # Solo quedan ACKs: se tolera el exceso antes que perder uno.
     assert buf.total() == 3
     assert all(r.kind == KIND_ACK for r in buf.due(now=10, limit=10))
+    buf.close()
+
+
+def test_lleno_descarta_lecturas_nunca_eventos(tmp_path):
+    buf = Buffer(tmp_path / "b.db", 2)
+    evento = put(buf, kind=KIND_EVENTO, now=0)
+    put(buf, now=1)
+    put(buf, now=2)
+    put(buf, kind=KIND_EVENTO, now=3)
+
+    # El evento más viejo sobrevive a lecturas más nuevas.
+    kinds = {r.id: r.kind for r in buf.due(now=10, limit=10)}
+    assert evento in kinds
+    assert list(kinds.values()).count(KIND_EVENTO) == 2
+    assert KIND_TELEMETRY not in kinds.values()
     buf.close()

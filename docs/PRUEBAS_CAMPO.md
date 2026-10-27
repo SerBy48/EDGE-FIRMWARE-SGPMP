@@ -52,6 +52,12 @@ Para acelerar, flashear los nodos de prueba con
 | E2E-6 | Corte de internet | Desconectar el uplink IP de la Raspberry 30 min | Sin pérdida: al volver, heartbeat con `estado_local_buffer=ACTIVO`, telemetría con `origen=BUFFER_LOCAL`, luego heartbeat `INACTIVO` |
 | E2E-7 | Corte de energía de la Raspberry | Quitar energía 5 min | Arranca sola (systemd), conserva config y buffer; los nodos siguen transmitiendo y el gateway los retoma |
 | E2E-8 | Proceso trabado | `sudo kill -STOP $(pidof -s python)` del servicio | systemd lo reinicia por watchdog en ≤ 60 s (`journalctl -u edge-agent` muestra "Watchdog timeout") |
+| E2E-9 | Regla RF-55 desde la plataforma | Sincronizar una regla `ESTRES_TERMICO` al Gateway (`POST /iot/reglas-alertas/{id}/sincronizar-edge`) | `ACK_REGLA` OK; `reglas.json` la contiene; con un DHT22 en ambiente cálido y húmedo (THI ≥ 72) llega un evento `DESVIACION_COMPUESTA` a `POST /iot/eventos-edge` con `valores_derivados.THI` |
+| E2E-10 | Evento Edge sin red | Repetir E2E-9 con el uplink IP cortado 30 min | Al volver, los eventos salen con `origen=BUFFER_LOCAL`, en orden y sin duplicados |
+
+Antes de E2E-9/10, QA puede reproducir cada caso de RF-55 sin hardware con
+el inyector de lecturas sintéticas (`CONTRATO_EVENTO_EDGE.md` §7):
+`python scripts/inyectar_lecturas.py scripts/casos_rf55.json`.
 
 ## 3. Batería (nodo)
 
