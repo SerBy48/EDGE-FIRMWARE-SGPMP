@@ -317,7 +317,7 @@ def test_falla_del_evaluador_no_tumba_la_captura(harness, monkeypatch, caplog):
     def explota(*args, **kwargs):
         raise RuntimeError("motor de reglas roto")
 
-    monkeypatch.setattr(agent_mod, "evaluar_simple", explota)
+    monkeypatch.setattr(agent_mod, "evaluar_lote", explota)
     con_umbral(harness)
     harness.advance(0)
     harness.advance(15 * 60)

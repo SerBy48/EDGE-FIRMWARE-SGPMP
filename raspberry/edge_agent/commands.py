@@ -27,6 +27,7 @@ from datetime import datetime
 from typing import Any
 
 from edge_agent.config_store import DeviceConfig, Umbral
+from edge_agent.reglas.evaluador import MAX_REGLAS_ACTIVAS, validar_regla
 from edge_agent.reglas.store import Regla
 
 TIPO_ACK = "ACK_CONFIGURACION"
@@ -201,12 +202,16 @@ def handle_regla(
     *,
     ahora: float | None = None,
     antiguedad_max_s: float | None = None,
+    activas: int = 0,
 ) -> ReglaResult:
     """Valida la regla de `data` contra la vigente con ese id (`current`).
 
     Igual que con el umbral, una reentrega QoS 1 o una `version_regla` menor o
     igual a la vigente se confirma OK sin guardar: un ERROR marcaría como
     fallida en el backend una sincronización que sí llegó.
+
+    Los límites duros de RF-55.2 se aplican acá, al recibir: `activas` es
+    cuántas reglas rigen hoy en este Edge.
     """
     comando_id = data.get("id_comando")
 
@@ -239,6 +244,13 @@ def handle_regla(
 
     if current is not None and version <= current.version_regla:
         return ReglaResult(ok(), None)
+
+    if es_activa:
+        if current is None and activas >= MAX_REGLAS_ACTIVAS:
+            return error(f"límite de {MAX_REGLAS_ACTIVAS} reglas activas alcanzado")
+        motivo = validar_regla(cuerpo)
+        if motivo is not None:
+            return error(f"regla inválida: {motivo}")
 
     regla = Regla(
         id_regla_alerta=id_regla,

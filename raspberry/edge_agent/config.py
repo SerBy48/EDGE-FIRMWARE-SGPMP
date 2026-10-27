@@ -93,6 +93,9 @@ class Settings:
     firmware_version: str = __version__
     # RF-55: debe coincidir con `mqtt_topic_evento` del broker (singular).
     topic_evento: str = "evento"
+    # RF-55.2: nombre canónico de las reglas → `variable` de la telemetría.
+    # Amplía o corrige `reglas.formulas.VARIABLES_DEFECTO`.
+    rf55_variables: dict[str, str] = field(default_factory=dict)
 
     def topic(self, serial: str, suffix: str) -> str:
         return f"{self.topic_prefix}/{serial}/{suffix}"
@@ -148,6 +151,7 @@ class Settings:
             lora=lora,
             firmware_version=_firmware_version(env),
             topic_evento=env.get("EDGE_TOPIC_EVENTO", "evento"),
+            rf55_variables=_parse_rf55_variables(env.get("EDGE_RF55_VARIABLES", "")),
         )
 
 
@@ -197,6 +201,14 @@ def _semver(raw: str) -> str:
     if not _SEMVER_TAG.fullmatch(tag):
         return raw
     return tag + ("+" + ".".join(build) if build else "")
+
+
+def _parse_rf55_variables(raw: str) -> dict[str, str]:
+    """Formato: `TEMPERATURA_AMBIENTAL=temp_aire;HUMEDAD_RELATIVA=hr` (vacío: defaults)."""
+    if not raw.strip():
+        return {}
+    mapa = _parse_mapping(raw, "EDGE_RF55_VARIABLES", ";")
+    return {canonica.upper(): variable for canonica, variable in mapa.items()}
 
 
 def _require(env: Mapping[str, str], name: str) -> str:

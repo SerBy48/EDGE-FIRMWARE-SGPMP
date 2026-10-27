@@ -54,9 +54,10 @@ def test_guarda_la_regla_y_confirma_con_ack_regla(harness):
 
 def test_version_mayor_reemplaza(harness):
     send(harness, regla())
-    ack = send(harness, regla(id_comando="r-2", version_regla=2, regla={"nombre": "nueva"}))
+    nueva = {**CUERPO, "umbral_max": "35.0"}
+    ack = send(harness, regla(id_comando="r-2", version_regla=2, regla=nueva))
     assert ack["resultado"] == "OK"
-    assert harness.reglas.get(12).regla == {"nombre": "nueva"}
+    assert harness.reglas.get(12).regla == nueva
 
 
 def test_reentrega_del_mismo_comando_se_confirma_sin_reaplicar(harness):

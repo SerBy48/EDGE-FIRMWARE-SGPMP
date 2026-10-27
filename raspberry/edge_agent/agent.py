@@ -42,9 +42,10 @@ from edge_agent.config import Settings
 from edge_agent.config_store import ConfigStore, UmbralStore
 from edge_agent.mqtt_client import Connected, Event, Message, PubAck
 from edge_agent.reglas import evento as ev
-from edge_agent.reglas.evaluador import evaluar_simple
+from edge_agent.reglas.evaluador import evaluar_lote
 from edge_agent.reglas.evento import EventoEdge
 from edge_agent.reglas.store import ReglaStore
+from edge_agent.reglas.ventana import EstadoCompuestas
 from edge_agent.sources import DataSource, Reading
 from edge_agent.system import ntp_sincronizado
 
@@ -116,6 +117,8 @@ class Agent:
         # ERROR_CONFIGURACION ya emitidos, por (regla, id, versión): uno solo
         # por configuración rota, no uno por lectura.
         self._errores_reportados: set[tuple[Any, ...]] = set()
+        # RF-55.2: ventana de correlación y confirmaciones (en memoria).
+        self._compuestas: EstadoCompuestas | None = EstadoCompuestas()
         now = clock()
         self._schedules = {
             serial: self._initial_schedule(serial, now) for serial in settings.serials
@@ -269,6 +272,7 @@ class Agent:
             self._reglas.get(data.get("id_regla_alerta")),
             ahora=now if self._reloj_sincronizado() else None,
             antiguedad_max_s=self._settings.comando_antiguedad_max_s,
+            activas=len(self._reglas.activas()),
         )
         ack = result.ack
         changed = False
@@ -328,8 +332,9 @@ class Agent:
     # --- telemetría y buffer --------------------------------------------
 
     def _capture(self, serial: str, due_at: float, now: float) -> None:
-        for reading in self._source.read(serial, _utc(now)):
-            # La lectura cruda primero: si el motor de reglas falla, ya está a salvo.
+        readings = self._source.read(serial, _utc(now))
+        # Las lecturas crudas primero: si el motor de reglas falla, ya están a salvo.
+        for reading in readings:
             self._buffer.enqueue(
                 serial=serial,
                 kind=buf.KIND_TELEMETRY,
@@ -338,21 +343,23 @@ class Agent:
                 due_at=due_at,
                 now=now,
             )
-            try:
-                self._evaluar(reading, now)
-            except Exception:
-                # Un fallo de RF-55 nunca puede tumbar la captura ni el servicio.
-                logger.exception("Falló la evaluación RF-55 de %s/%s", serial, reading.variable)
-
-    def _evaluar(self, reading: Reading, now: float) -> None:
-        evento = evaluar_simple(
-            reading,
-            self._umbrales.todos(),
-            ahora=_utc(now),
-            version_firmware=self._settings.firmware_version,
-        )
-        if evento is not None:
-            self._encolar_evento(evento, now)
+        try:
+            # La captura completa junta: una compuesta ve las variables que
+            # llegaron juntas y prevalece sobre los simples de esas lecturas.
+            eventos = evaluar_lote(
+                readings,
+                self._umbrales.todos(),
+                self._reglas.activas(),
+                estado=self._compuestas,
+                variables=self._settings.rf55_variables,
+                ahora=_utc(now),
+                version_firmware=self._settings.firmware_version,
+            )
+            for evento in eventos:
+                self._encolar_evento(evento, now)
+        except Exception:
+            # Un fallo de RF-55 nunca puede tumbar la captura ni el servicio.
+            logger.exception("Falló la evaluación RF-55 de %s", serial)
 
     def _encolar_evento(self, evento: EventoEdge, now: float) -> None:
         if evento.clasificacion == ev.ERROR_CONFIGURACION:
