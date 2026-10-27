@@ -14,8 +14,6 @@ venv/
 
 # PlatformIO
 esp32/.pio/
-# Clave de cada nodo LoRa (lora-key): nunca versionar
-esp32/secrets*.ini
 esp32/.vscode/
 
 # OS

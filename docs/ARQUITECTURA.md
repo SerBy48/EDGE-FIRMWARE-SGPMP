@@ -30,43 +30,22 @@ mundo MQTT/IP. Ningún ESP32 se conecta nunca directo al broker.
 ┌──────────────────────────────┐   lecturas   ┌──────────────────────────────┐  eventos  ┌──────────────────┐
 │ lora/gateway.py              │ ───────────▶ │ agenda captura/tx/heartbeat  │ ◀──────── │ mqtt_client.py   │
 │  sx1276.py (SPI)             │              │ commands.py → config_store   │           │ sesión           │
-│  protocol.py (tramas v1)     │ ◀─────────── │   y reglas/store (RF-55)     │ ────────▶ │ persistente,     │
-│  dedupe/pérdidas por seq     │  config      │ reglas/evaluador (RF-55)     │  publish  │ QoS 1, TLS opc.  │
-│  downlink CONFIG en ventana  │  deseada     │ buffer.py (outbox SQLite)    │           │                  │
-│                              │              │ heartbeat (estado buffer)    │           │                  │
+│  protocol.py (tramas v1)     │ ◀─────────── │ buffer.py (outbox SQLite)    │ ────────▶ │ persistente,     │
+│  dedupe/pérdidas por seq     │  config      │ heartbeat (estado buffer)    │  publish  │ QoS 1, TLS opc.  │
+│  downlink CONFIG en ventana  │  deseada     │                              │           │                  │
 └──────────────────────────────┘              └──────────────────────────────┘           └──────────────────┘
    (o FakeLoraSource: datos sintéticos, EDGE_SOURCE=fake)      │ sd_notify (watchdog de systemd)
 ```
 
 - Solo el hilo principal toca SQLite y la config; los otros hilos entregan
   eventos y lecturas por colas o con un lock.
-- Todo lo que debe llegar al broker (telemetría, eventos Edge, ACK) pasa
-  primero por el buffer y se borra con el PUBACK: sobrevive cortes de red y
-  reinicios.
+- Todo lo que debe llegar al broker (telemetría, ACK) pasa primero por el
+  buffer y se borra con el PUBACK: sobrevive cortes de red y reinicios.
 
 Ningún módulo de este proceso toca directamente la base de datos ni el
 backend HTTPS — esa separación de capas ya vive en `BROKER-MQTT-SGPMP` y no
 se duplica acá (mismo principio que su `AGENTS.md`, aunque este es un repo
 distinto).
-
-## Motor de reglas RF-55 (`edge_agent/reglas/`)
-
-Clasifica cada captura en el Edge antes de enviarla. Contrato y casos:
-`CONTRATO_EVENTO_EDGE.md`.
-
-| Módulo | Rol |
-|---|---|
-| `store.py` | `ReglaStore`: reglas de `REGLA_COMPUESTA` en `reglas.json` (archivo propio; un rollback del updater no lo lee y el resto del estado queda intacto) |
-| `evaluador.py` | Funciones sin I/O: `evaluar_simple` (RF-55.1, umbrales RF-17), `evaluar_lote` (captura completa, RF-55.2 y prevalencia) y `validar_regla` (límites al recibir) |
-| `formulas.py` | Catálogo cerrado de fórmulas Tipo B (`ESTRES_TERMICO`) y mapa de nombres canónicos a variables de telemetría |
-| `ventana.py` | Estado en memoria de RF-55.2: ventana de correlación (≤ 30 s) y conteos de confirmación Tipo A; acotado y no persistido |
-| `evento.py` | Sobre del evento Edge (`a_payload`) |
-| `perfil.py` | Perfil de hardware al arrancar: habilita o no RF-55.2 |
-
-En `_capture` la telemetría se encola primero y la evaluación va en un
-`try/except`: un fallo de RF-55 nunca tumba la captura ni el servicio. Los
-eventos salen por `sgpmp/<serial nodo>/evento` sin esperar la ventana de
-transmisión.
 
 ## Fuera de alcance de este repositorio
 

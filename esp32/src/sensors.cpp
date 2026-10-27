@@ -3,127 +3,111 @@
 #include <Arduino.h>
 
 #include "config.h"
-#include "sensor_drivers.h"
 
-#if defined(SENSOR_MPU6050) || defined(SENSOR_MAX30102)
-#include <Wire.h>
+#if !defined(SENSOR_SIMULADO) && !defined(SENSOR_DHT22) && !defined(SENSOR_DS18B20)
+#error "Definir al menos un sensor (SENSOR_DHT22, SENSOR_DS18B20 o SENSOR_SIMULADO) en platformio.ini"
+#endif
+#if defined(SENSOR_SIMULADO) && (defined(SENSOR_DHT22) || defined(SENSOR_DS18B20))
+#error "SENSOR_SIMULADO usa los mismos codes que los sensores reales: no combinarlos"
 #endif
 
-#if !defined(SENSOR_SIMULADO) && !defined(SENSOR_DHT22) && !defined(SENSOR_DS18B20) && \
-    !defined(SENSOR_MPU6050) && !defined(SENSOR_MAX30102)
-#error "Definir al menos un sensor (SENSOR_DHT22, SENSOR_DS18B20, ...) en platformio.ini"
+#if defined(SENSOR_DHT22)
+#include <DHT.h>
 #endif
-#if defined(SENSOR_SIMULADO) && defined(SENSOR_DHT22)
-#error "SENSOR_SIMULADO usa los codes del DHT22: no combinarlos"
+#if defined(SENSOR_DS18B20)
+#include <DallasTemperature.h>
+#include <OneWire.h>
 #endif
-
-#define SENSORS_STR_(x) #x
-#define SENSORS_STR(x) SENSORS_STR_(x)
-#define I2C_WHERE "I2C SDA GPIO" SENSORS_STR(PIN_I2C_SDA) ", SCL GPIO" SENSORS_STR(PIN_I2C_SCL)
 
 namespace {
 
-constexpr uint8_t kCodes[VAR_COUNT] = {
-    SENSOR_CODE_TEMPERATURA,       SENSOR_CODE_HUMEDAD,
-    SENSOR_CODE_TEMPERATURA_DS18B20, SENSOR_CODE_ACTIVIDAD,
-    SENSOR_CODE_ACELERACION_PICO,  SENSOR_CODE_INCLINACION_PITCH,
-    SENSOR_CODE_INCLINACION_ROLL,  SENSOR_CODE_FRECUENCIA_CARDIACA,
-    SENSOR_CODE_SPO2,
-};
+#if defined(SENSOR_DHT22)
+// El datasheet pide 1-2 s tras alimentarlo antes de la primera lectura.
+constexpr uint32_t kDhtWarmupMs = 2000;
+DHT dht(PIN_DHT22, DHT22);
+bool dht_cold = false;
+#endif
 
-String describe(uint8_t mask) {
-  static const struct {
-    uint8_t bit;
-    const char* name;
-  } kNames[] = {{sgpmp::SENSOR_BIT_DHT22, "DHT22"},
-                {sgpmp::SENSOR_BIT_DS18B20, "DS18B20"},
-                {sgpmp::SENSOR_BIT_MPU6050, "MPU6050"},
-                {sgpmp::SENSOR_BIT_MAX30102, "MAX30102"}};
-  String s;
-  for (const auto& n : kNames) {
-    if (mask & n.bit) {
-      s += s.length() ? ", " : "";
-      s += n.name;
-    }
-  }
-  return s.length() ? s : String("ninguno");
-}
+#if defined(SENSOR_DS18B20)
+OneWire one_wire(PIN_DS18B20);
+DallasTemperature ds18b20(&one_wire);
+uint32_t ds_requested_ms = 0;
+// 85 C es el valor de reset del scratchpad: aparece si la conversión no llegó
+// a correr (alimentación o bus inestables), no es una medición.
+constexpr float kDsResetValue = 85.0f;
+#endif
 
-// `where`: dónde se lo buscó, para que el log de un sensor no detectado diga
-// qué cable revisar.
-[[maybe_unused]] void track(SensorReading& out, uint8_t bit, SensorStatus status,
-                            const char* where) {
-  if (status == SensorStatus::AUSENTE) {
-    Serial.printf("[sensor] %s no detectado (%s)\n", describe(bit).c_str(), where);
-  } else {
-    out.detected |= bit;
-  }
-  if (status == SensorStatus::FALLA) {
-    out.failing |= bit;
+void add(SensorReading& out, uint8_t code, float value) {
+  if (out.count < SENSOR_MAX_MEASUREMENTS) {
+    out.m[out.count++] = {code, value};
   }
 }
 
 }  // namespace
 
-uint8_t sensor_var_code(SensorVar var) { return kCodes[var]; }
-
 void sensors_begin(bool cold) {
-#if defined(SENSOR_MPU6050) || defined(SENSOR_MAX30102)
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  Wire.setClock(100000);  // los módulos traen pull-ups débiles
-#endif
-  // El orden importa: la conversión del DS18B20 (hasta 750 ms) corre
-  // mientras se leen los demás.
 #if defined(SENSOR_DS18B20)
-  ds18b20_begin();
+  // La conversión arranca aquí y corre en paralelo con la lectura del DHT22.
+  ds18b20.begin();
+  ds18b20.setResolution(DS18B20_RESOLUTION);
+  ds18b20.setWaitForConversion(false);
+  ds18b20.requestTemperatures();
+  ds_requested_ms = millis();
 #endif
 #if defined(SENSOR_DHT22)
-  dht22_begin(cold);
+  dht.begin();
+  dht_cold = cold;
 #else
   (void)cold;
-#endif
-#if defined(SENSOR_MPU6050)
-  mpu6050_begin();
-#endif
-#if defined(SENSOR_MAX30102)
-  max30102_begin();
 #endif
 }
 
 void sensors_read(SensorReading& out) {
-  out = SensorReading{};
+  out.count = 0;
+  out.error = false;
 
-  // Primero la ventana del MPU6050 (~2 s): cubre la conversión del DS18B20 y
-  // el arranque del DHT22 tras un encendido.
-#if defined(SENSOR_MPU6050)
-  track(out, sgpmp::SENSOR_BIT_MPU6050, mpu6050_read(out), I2C_WHERE " 0x68/0x69");
-#endif
-#if defined(SENSOR_DS18B20)
-  track(out, sgpmp::SENSOR_BIT_DS18B20, ds18b20_read(out), "DATA en GPIO" SENSORS_STR(PIN_DS18B20));
-#endif
 #if defined(SENSOR_DHT22)
-  track(out, sgpmp::SENSOR_BIT_DHT22, dht22_read(out), "DATA en GPIO" SENSORS_STR(PIN_DHT22));
+  if (dht_cold) {
+    while (millis() < kDhtWarmupMs) {
+      delay(10);
+    }
+  }
+  const float t = dht.readTemperature();
+  const float h = dht.readHumidity();  // misma lectura de 40 bits que la temperatura
+  if (isnan(t) || isnan(h)) {
+    Serial.println("[sensor] DHT22 sin respuesta o checksum inválido");
+    out.error = true;
+  } else {
+    add(out, SENSOR_CODE_TEMPERATURA, t);
+    add(out, SENSOR_CODE_HUMEDAD, h);
+  }
 #endif
-#if defined(SENSOR_MAX30102)
-  track(out, sgpmp::SENSOR_BIT_MAX30102, max30102_read(out), I2C_WHERE " 0x57");
+
+#if defined(SENSOR_DS18B20)
+  const uint32_t conv_ms = ds18b20.millisToWaitForConversion(DS18B20_RESOLUTION);
+  while (millis() - ds_requested_ms < conv_ms) {
+    delay(5);
+  }
+  const float ds = ds18b20.getTempCByIndex(0);
+  if (ds == DEVICE_DISCONNECTED_C || ds == kDsResetValue) {
+    Serial.printf("[sensor] DS18B20 lectura inválida (%.2f)\n", ds);
+    out.error = true;
+  } else {
+    add(out, SENSOR_CODE_TEMPERATURA_DS18B20, ds);
+  }
 #endif
 
 #if defined(SENSOR_SIMULADO)
   // Valores sintéticos: suficientes para validar el enlace, no para medir.
 #if defined(ESP32)
-  out.set(VAR_TEMPERATURA, temperatureRead());  // sensor interno del ESP32
+  add(out, SENSOR_CODE_TEMPERATURA, temperatureRead());  // sensor interno del ESP32
 #else
-  out.set(VAR_TEMPERATURA, 20.0f + static_cast<float>(random(0, 1000)) / 100.0f);
+  add(out, SENSOR_CODE_TEMPERATURA, 20.0f + static_cast<float>(random(0, 1000)) / 100.0f);
 #endif
-  out.set(VAR_HUMEDAD, 40.0f + static_cast<float>(random(0, 5000)) / 100.0f);
-  out.detected |= sgpmp::SENSOR_BIT_DHT22;
+  add(out, SENSOR_CODE_HUMEDAD, 40.0f + static_cast<float>(random(0, 5000)) / 100.0f);
 #endif
 
-  for (uint8_t i = 0; i < VAR_COUNT; ++i) {
-    if (out.has(static_cast<SensorVar>(i))) {
-      Serial.printf("[sensor] code %u = %.2f\n", kCodes[i], out.values[i]);
-    }
+  for (uint8_t i = 0; i < out.count; ++i) {
+    Serial.printf("[sensor] code %u = %.2f\n", out.m[i].code, out.m[i].value);
   }
-  Serial.printf("[sensor] detectados: %s; fallando: %s\n", describe(out.detected).c_str(),
-                describe(out.failing).c_str());
 }

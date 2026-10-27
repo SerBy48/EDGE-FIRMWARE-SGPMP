@@ -11,9 +11,9 @@ documento de resultados.
 | Paso | Cómo | Verificación |
 |---|---|---|
 | Parámetros de radio legales | Confirmar frecuencia y potencia con la ANE; fijar `EDGE_LORA_FREQ_HZ`/`EDGE_LORA_TX_POWER_DBM` y `LORA_FREQ_HZ`/`LORA_TX_POWER_DBM` | Mismo valor en `/etc/sgpmp/edge-agent.env` y en `platformio.ini` |
-| Nodos flasheados | `pio run -e nodemcuv2 -t upload` con el `secrets.ini` de cada nodo (`lora-key <serial>`, `INSTALACION_RASPBERRY.md` §9.3) | El monitor serie muestra `[boot] nodo <serial>` y la misma huella de clave que el log de la Raspberry |
+| Nodos flasheados | `pio run -e nodemcuv2 -t upload` (o `esp32dev`) con un `NODE_ID` distinto por nodo | Serial del ESP32 muestra `[boot] nodo 0x000N` |
 | Raspberry instalada | `sudo raspberry/scripts/install.sh --env ...` con `EDGE_SOURCE=lora` | `systemctl status edge-agent` activo; log "Gateway LoRa escuchando" |
-| Seriales registrados | Cada serial de nodo de `EDGE_SERIALS` existe en `modulo9.dispositivos_iot` y apunta a este Gateway Edge | `GET /v1/devices` los lista |
+| Seriales registrados | Cada serial de `EDGE_LORA_NODES` existe en `modulo9.dispositivos_iot` | `GET /v1/devices` los lista |
 | Variables | Cada `nombre` de `EDGE_LORA_VARIABLES` existe en `modulo9.variables_ambientales` | La telemetría aparece en la BD, sin `VariableNotFoundError` en el broker |
 
 Para las pruebas de enlace (L1–L4) se usa el monitor, con el servicio detenido
@@ -52,12 +52,6 @@ Para acelerar, flashear los nodos de prueba con
 | E2E-6 | Corte de internet | Desconectar el uplink IP de la Raspberry 30 min | Sin pérdida: al volver, heartbeat con `estado_local_buffer=ACTIVO`, telemetría con `origen=BUFFER_LOCAL`, luego heartbeat `INACTIVO` |
 | E2E-7 | Corte de energía de la Raspberry | Quitar energía 5 min | Arranca sola (systemd), conserva config y buffer; los nodos siguen transmitiendo y el gateway los retoma |
 | E2E-8 | Proceso trabado | `sudo kill -STOP $(pidof -s python)` del servicio | systemd lo reinicia por watchdog en ≤ 60 s (`journalctl -u edge-agent` muestra "Watchdog timeout") |
-| E2E-9 | Regla RF-55 desde la plataforma | Sincronizar una regla `ESTRES_TERMICO` al Gateway (`POST /iot/reglas-alertas/{id}/sincronizar-edge`) | `ACK_REGLA` OK; `reglas.json` la contiene; con un DHT22 en ambiente cálido y húmedo (THI ≥ 72) llega un evento `DESVIACION_COMPUESTA` a `POST /iot/eventos-edge` con `valores_derivados.THI` |
-| E2E-10 | Evento Edge sin red | Repetir E2E-9 con el uplink IP cortado 30 min | Al volver, los eventos salen con `origen=BUFFER_LOCAL`, en orden y sin duplicados |
-
-Antes de E2E-9/10, QA puede reproducir cada caso de RF-55 sin hardware con
-el inyector de lecturas sintéticas (`CONTRATO_EVENTO_EDGE.md` §7):
-`python scripts/inyectar_lecturas.py scripts/casos_rf55.json`.
 
 ## 3. Batería (nodo)
 

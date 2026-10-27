@@ -13,9 +13,6 @@ RF-17 (INC-M09-104-G29, `INTEGRACION_DISPOSITIVOS_RF17.md` del broker): por el
 mismo topic llega el umbral ambiental de una especie, con
 `tipo_comando: "UMBRAL_AMBIENTAL"`, y se confirma con `ACK_UMBRAL`. Sin
 `tipo_comando` es la configuración RF-23 de siempre.
-
-RF-55 (BRK-05, `PLAN_RF55_00_CONTEXTO_Y_CONTRATOS.md` §6): las reglas de alerta
-llegan con `tipo_comando: "REGLA_COMPUESTA"` y se confirman con `ACK_REGLA`.
 """
 
 from __future__ import annotations
@@ -27,14 +24,10 @@ from datetime import datetime
 from typing import Any
 
 from edge_agent.config_store import DeviceConfig, Umbral
-from edge_agent.reglas.evaluador import MAX_REGLAS_ACTIVAS, validar_regla
-from edge_agent.reglas.store import Regla
 
 TIPO_ACK = "ACK_CONFIGURACION"
 TIPO_COMANDO_UMBRAL = "UMBRAL_AMBIENTAL"
 TIPO_ACK_UMBRAL = "ACK_UMBRAL"
-TIPO_COMANDO_REGLA = "REGLA_COMPUESTA"
-TIPO_ACK_REGLA = "ACK_REGLA"
 _NIVELES = {"normal", "precaucion", "critico"}
 
 
@@ -49,12 +42,6 @@ class CommandResult:
 class UmbralResult:
     ack: dict[str, Any]
     umbral: Umbral | None  # None: no hay nada que guardar (error, repetido o más viejo)
-
-
-@dataclass(frozen=True)
-class ReglaResult:
-    ack: dict[str, Any]
-    regla: Regla | None  # None: no hay nada que guardar (error, repetido o más viejo)
 
 
 def handle_command(
@@ -194,72 +181,6 @@ def handle_umbral(
         comando_id=comando_id,
     )
     return UmbralResult(ok(), umbral)
-
-
-def handle_regla(
-    data: dict[str, Any],
-    current: Regla | None,
-    *,
-    ahora: float | None = None,
-    antiguedad_max_s: float | None = None,
-    activas: int = 0,
-) -> ReglaResult:
-    """Valida la regla de `data` contra la vigente con ese id (`current`).
-
-    Igual que con el umbral, una reentrega QoS 1 o una `version_regla` menor o
-    igual a la vigente se confirma OK sin guardar: un ERROR marcaría como
-    fallida en el backend una sincronización que sí llegó.
-
-    Los límites duros de RF-55.2 se aplican acá, al recibir: `activas` es
-    cuántas reglas rigen hoy en este Edge.
-    """
-    comando_id = data.get("id_comando")
-
-    def error(motivo: str) -> ReglaResult:
-        return ReglaResult(_ack("ERROR", comando_id, None, motivo, tipo=TIPO_ACK_REGLA), None)
-
-    def ok() -> dict[str, Any]:
-        return _ack("OK", comando_id, None, tipo=TIPO_ACK_REGLA)
-
-    if comando_id is not None and current is not None and comando_id == current.comando_id:
-        return ReglaResult(ok(), None)
-
-    if ahora is not None and antiguedad_max_s is not None:
-        emitido = _epoch(data.get("emitido_en"))
-        if emitido is not None and ahora - emitido > antiguedad_max_s:
-            return error("comando vencido: emitido_en demasiado antiguo")
-
-    id_regla = data.get("id_regla_alerta")
-    version = data.get("version_regla")
-    es_activa = data.get("es_activa")
-    cuerpo = data.get("regla")
-    if not _is_positive_int(id_regla):
-        return error("id_regla_alerta debe ser un entero > 0")
-    if not _is_positive_int(version):
-        return error("version_regla debe ser un entero >= 1")
-    if not isinstance(es_activa, bool):
-        return error("es_activa debe ser booleano")
-    if not isinstance(cuerpo, dict) or not cuerpo:
-        return error("regla debe ser un objeto no vacío")
-
-    if current is not None and version <= current.version_regla:
-        return ReglaResult(ok(), None)
-
-    if es_activa:
-        if current is None and activas >= MAX_REGLAS_ACTIVAS:
-            return error(f"límite de {MAX_REGLAS_ACTIVAS} reglas activas alcanzado")
-        motivo = validar_regla(cuerpo)
-        if motivo is not None:
-            return error(f"regla inválida: {motivo}")
-
-    regla = Regla(
-        id_regla_alerta=id_regla,
-        version_regla=version,
-        regla=cuerpo,
-        es_activa=es_activa,
-        comando_id=comando_id,
-    )
-    return ReglaResult(ok(), regla)
 
 
 def error_ack(comando_id: Any, motivo: str, *, tipo: str = TIPO_ACK) -> dict[str, Any]:

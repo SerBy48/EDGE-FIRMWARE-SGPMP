@@ -86,9 +86,6 @@ class UmbralStore:
     def get(self, id_umbral_ambiental: int) -> Umbral | None:
         return self._umbrales.get(id_umbral_ambiental)
 
-    def todos(self) -> list[Umbral]:
-        return list(self._umbrales.values())
-
     def set(self, umbral: Umbral) -> None:
         """Guarda en disco antes de retornar: el ACK solo sale después de esto."""
         umbrales = {**self._umbrales, umbral.id_umbral_ambiental: umbral}
