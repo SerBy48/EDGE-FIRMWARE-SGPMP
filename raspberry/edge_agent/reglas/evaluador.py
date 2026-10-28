@@ -447,10 +447,14 @@ def _interpretar_tipo_a(cuerpo: dict[str, Any]) -> _TipoA:
             f"lectura_confirmacion_max debe ser un entero entre 1 y {MAX_LECTURAS_CONFIRMACION}"
         )
     ventana_min = _opcional(cuerpo, "ventana_confirmacion_min")
-    if ventana_min is not None and ventana_min <= 0:
-        raise ReglaInvalida("ventana_confirmacion_min debe ser > 0")
+    if ventana_min is not None and ventana_min < 0:
+        raise ReglaInvalida("ventana_confirmacion_min no puede ser negativa")
+    if ventana_min == 0:
+        # La columna es NOT NULL en `modulo3.reglas_alertas`: el backend manda
+        # 0 en una regla sin ventana. Solo tiene sentido con una lectura.
+        ventana_min = None
     if lecturas > 1 and ventana_min is None:
-        raise ReglaInvalida("ventana_confirmacion_min es obligatoria con más de una lectura")
+        raise ReglaInvalida("ventana_confirmacion_min > 0 es obligatoria con más de una lectura")
 
     severidades = cuerpo.get("umbrales_severidad")
     if severidades is not None and not isinstance(severidades, dict):

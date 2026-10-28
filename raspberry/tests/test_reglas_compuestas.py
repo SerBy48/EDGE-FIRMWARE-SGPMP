@@ -279,6 +279,20 @@ def test_tipo_a_en_rango_no_cuenta():
         assert evaluar(lecturas, [regla(VENTANA_A)], estado=estado, ahora=ahora) == []
 
 
+def test_tipo_a_ventana_cero_con_una_lectura_es_sin_ventana():
+    # Así llega del CRUD del backend una regla sin ventana (columna NOT NULL).
+    cuerpo = {
+        **VENTANA_A,
+        "ventana_confirmacion_min": "0.0000",
+        "lectura_confirmacion_max": "1.0000",
+    }
+    assert validar_regla(cuerpo) is None
+    assert handle_regla(comando(cuerpo), None).ack["resultado"] == "OK"
+    (evento,) = evaluar([lectura("temperatura_ambiente", 31.0)], [regla(cuerpo)])
+    assert evento.clasificacion == "DESVIACION_COMPUESTA"
+    assert evento.metadata["ventana_confirmacion_min"] is None
+
+
 def test_tipo_a_severidad_desde_umbrales_severidad():
     cuerpo = {
         **VENTANA_A,
@@ -344,6 +358,8 @@ def test_formula_con_4_variables_se_rechaza(monkeypatch):
         {**VENTANA_A, "lectura_confirmacion_max": 0},
         {**VENTANA_A, "lectura_confirmacion_max": 1000},
         {**VENTANA_A, "ventana_confirmacion_min": None},
+        {**VENTANA_A, "ventana_confirmacion_min": "0.0000"},  # 0 con 3 lecturas
+        {**VENTANA_A, "ventana_confirmacion_min": "-5"},
         {**VENTANA_A, "umbrales_severidad": {"severidad": "GRAVE"}},
         {**VENTANA_A, "umbral_max": True},
     ],
