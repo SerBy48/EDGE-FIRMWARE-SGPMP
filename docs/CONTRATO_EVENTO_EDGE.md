@@ -177,7 +177,9 @@ dispara y no es error. La variable que disparó la evaluación va primera.
 `tipo_sensor` + `categoria_variable` (ej. `TEMPERATURA_AMBIENTAL`); dispara
 `DESVIACION_COMPUESTA` cuando la lectura sale de `[umbral_min, umbral_max]`
 `lectura_confirmacion_max` veces dentro de `ventana_confirmacion_min` minutos, y
-la cuenta se reinicia. Severidad: `umbrales_severidad.severidad`, o `MODERADO`.
+la cuenta se reinicia. `ventana_confirmacion_min = 0` significa "sin ventana"
+(la columna es NOT NULL en el backend) y solo se acepta con
+`lectura_confirmacion_max = 1`. Severidad: `umbrales_severidad.severidad`, o `MODERADO`.
 Los números pueden venir como texto (Decimal serializado del backend).
 
 **Nombres de variable.** Las reglas usan nombres canónicos; el Edge los traduce
