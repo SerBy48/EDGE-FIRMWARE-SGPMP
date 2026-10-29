@@ -43,6 +43,11 @@ mundo MQTT/IP. Ningún ESP32 se conecta nunca directo al broker.
 - Todo lo que debe llegar al broker (telemetría, eventos Edge, ACK) pasa
   primero por el buffer y se borra con el PUBACK: sobrevive cortes de red y
   reinicios.
+- Las escrituras de una captura (buffer e historial) van en una transacción, y
+  cada racha de PUBACK también: un fsync por bloque, no por fila. Cada vuelta
+  del loop captura a lo sumo `PRESUPUESTO_CAPTURAS_S` (200 ms, al menos un
+  nodo); con una ráfaga, el resto queda para la vuelta siguiente y entretanto
+  se atienden comandos y PUBACK (TC-M03-102, `CONTRATO_EVENTO_EDGE.md` §6.2).
 
 Ningún módulo de este proceso toca directamente la base de datos ni el
 backend HTTPS — esa separación de capas ya vive en `BROKER-MQTT-SGPMP` y no
@@ -57,14 +62,20 @@ Clasifica cada captura en el Edge antes de enviarla. Contrato y casos:
 | Módulo | Rol |
 |---|---|
 | `store.py` | `ReglaStore`: reglas de `REGLA_COMPUESTA` en `reglas.json` (archivo propio; un rollback del updater no lo lee y el resto del estado queda intacto) |
-| `evaluador.py` | Funciones sin I/O: `evaluar_simple` (RF-55.1, umbrales RF-17), `evaluar_lote` (captura completa, RF-55.2 y prevalencia) y `validar_regla` (límites al recibir) |
-| `formulas.py` | Catálogo cerrado de fórmulas Tipo B (`ESTRES_TERMICO`) y mapa de nombres canónicos a variables de telemetría |
+| `evaluador.py` | Funciones sin I/O: `evaluar_simple` (RF-55.1, umbrales RF-17), `evaluar_lote` (captura completa, RF-55.2 y prevalencia), `validar_regla` (límites al recibir) y `motivo_niveles` (forma válida de un umbral, también al recibirlo) |
+| `formulas.py` | Catálogo cerrado de fórmulas Tipo B (`ESTRES_TERMICO`, `CALIDAD_HIDRICA`, `CALIDAD_AIRE`), mapa de nombres canónicos a variables de telemetría y rangos físicos |
 | `ventana.py` | Estado en memoria de RF-55.2: ventana de correlación (≤ 30 s) y conteos de confirmación Tipo A; acotado y no persistido |
 | `evento.py` | Sobre del evento Edge (`a_payload`) |
 | `perfil.py` | Perfil de hardware al arrancar: habilita o no RF-55.2 |
+| `disyuntor.py` | Fallas de RF-55.2 en ejecución: alternativa RF-55.1 por captura, deshabilitación tras N fallas seguidas y reintento automático |
+
+Fuera de `reglas/`: `historial.py` (log local de clasificaciones, `historial.db`)
+e `inspeccionar.py` (CLI de solo lectura del buffer y del historial).
 
 En `_capture` la telemetría se encola primero y la evaluación va en un
-`try/except`: un fallo de RF-55 nunca tumba la captura ni el servicio. Los
+`try/except`: un fallo de RF-55 nunca tumba la captura ni el servicio. Dentro
+de `evaluar_lote`, RF-55.2 va aislado: si falla, la captura entera se clasifica
+con RF-55.1 y el disyuntor cuenta la falla. Los
 eventos salen por `sgpmp/<serial nodo>/evento` sin esperar la ventana de
 transmisión.
 
