@@ -140,7 +140,9 @@ class Buffer:
     def capacidad(self) -> int:
         return self._max_rows
 
-    def ultimo_pendiente(self, serial: str, now: float, exclude: Collection[int] = ()) -> float | None:
+    def ultimo_pendiente(
+        self, serial: str, now: float, exclude: Collection[int] = ()
+    ) -> float | None:
         """Captura más reciente de `serial` que sigue vencida sin PUBACK (RF-54)."""
         ids = list(exclude)
         placeholders = ",".join("?" * len(ids))

@@ -89,4 +89,3 @@ def test_ultimo_pendiente_es_la_captura_vencida_mas_reciente_sin_las_en_camino(t
     assert buf.ultimo_pendiente("A", now=100.0) == 20.0
     assert buf.ultimo_pendiente("A", now=100.0, exclude=[enviada]) == 10.0
     buf.close()
-
