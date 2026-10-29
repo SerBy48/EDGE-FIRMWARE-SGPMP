@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-10-29 | Arekkazu | TC-DIS-148 RF-54: capacidad y último pendiente del buffer      |
 from edge_agent.buffer import KIND_ACK, KIND_EVENTO, KIND_TELEMETRY, Buffer
 
 
@@ -72,4 +75,17 @@ def test_lleno_descarta_lecturas_nunca_eventos(tmp_path):
     assert evento in kinds
     assert list(kinds.values()).count(KIND_EVENTO) == 2
     assert KIND_TELEMETRY not in kinds.values()
+    buf.close()
+
+
+def test_ultimo_pendiente_es_la_captura_vencida_mas_reciente_sin_las_en_camino(tmp_path):
+    buf = Buffer(tmp_path / "b.db", 10)
+    assert buf.capacidad == 10
+    assert buf.ultimo_pendiente("A", now=100.0) is None
+    put(buf, now=10.0)
+    enviada = put(buf, now=20.0)
+    put(buf, due_at=500.0, now=30.0)  # todavía no vence
+    put(buf, now=40.0, serial="B")
+    assert buf.ultimo_pendiente("A", now=100.0) == 20.0
+    assert buf.ultimo_pendiente("A", now=100.0, exclude=[enviada]) == 10.0
     buf.close()

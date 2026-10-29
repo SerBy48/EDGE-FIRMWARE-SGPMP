@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-10-29 | Arekkazu | TC-DIS-148 RF-54: capacidad y último pendiente para el heartbeat |
 """Buffer local persistente (outbox) para telemetría, eventos Edge (RF-55) y ACKs.
 
 Todo lo que debe llegar al broker pasa por acá antes de publicarse, y la fila
@@ -132,6 +135,23 @@ class Buffer:
     def total(self) -> int:
         (count,) = self._db.execute("SELECT COUNT(*) FROM outbox").fetchone()
         return int(count)
+
+    @property
+    def capacidad(self) -> int:
+        return self._max_rows
+
+    def ultimo_pendiente(
+        self, serial: str, now: float, exclude: Collection[int] = ()
+    ) -> float | None:
+        """Captura más reciente de `serial` que sigue vencida sin PUBACK (RF-54)."""
+        ids = list(exclude)
+        placeholders = ",".join("?" * len(ids))
+        not_in = f" AND id NOT IN ({placeholders})" if ids else ""
+        (ultimo,) = self._db.execute(
+            f"SELECT MAX(created_at) FROM outbox WHERE serial = ? AND due_at <= ?{not_in}",
+            (serial, now, *ids),
+        ).fetchone()
+        return ultimo
 
     def state(self, serial: str, now: float, exclude: Collection[int] = ()) -> str:
         if self.total() >= self._max_rows:

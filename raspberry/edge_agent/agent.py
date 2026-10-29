@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-10-29 | Arekkazu | TC-DIS-148 RF-54: el heartbeat lleva metricas_buffer           |
 """Orquestación del edge_agent.
 
 Un único hilo maneja todo el estado: agenda de captura/transmisión/heartbeat
@@ -439,10 +442,20 @@ class Agent:
         # Lo que ya está publicado esperando PUBACK no cuenta como retenido.
         sending = self._sending()
         estado = self._buffer.state(serial, now, exclude=sending)
+        ultimo = self._buffer.ultimo_pendiente(serial, now, exclude=sending)
         payload = {
             "tipo_mensaje": "HEARTBEAT",
             "estado_local_buffer": estado,
             "datos_pendientes_buffer": self._buffer.pending_count(serial, now, exclude=sending),
+            # RF-54 (TC-DIS-148): el panel del backend clasifica la ocupación (80 % / 95 %).
+            # El outbox es uno para toda la Raspberry; lleno, descarta la telemetría más
+            # vieja (POLITICA_SOBRESCRITURA). ACKs y eventos pueden excederlo: se acota.
+            "metricas_buffer": {
+                "capacidad_total": self._buffer.capacidad,
+                "capacidad_utilizada": min(self._buffer.total(), self._buffer.capacidad),
+                "ultimo_timestamp_pendiente": _iso(ultimo) if ultimo is not None else None,
+                "politica_buffer_activa": "POLITICA_SOBRESCRITURA",
+            },
             "version_firmware": self._settings.firmware_version,
             "reloj_sincronizado": self._reloj_sincronizado(),
             "fecha_registro": _iso(now),
