@@ -30,6 +30,10 @@ TEMPERATURA_AMBIENTAL = "TEMPERATURA_AMBIENTAL"
 HUMEDAD_RELATIVA = "HUMEDAD_RELATIVA"
 TEMPERATURA_CORPORAL = "TEMPERATURA_CORPORAL"
 FRECUENCIA_RESPIRATORIA = "FRECUENCIA_RESPIRATORIA"
+PH = "PH"
+OXIGENO_DISUELTO = "OXIGENO_DISUELTO"
+AMONIACO = "AMONIACO"
+DIOXIDO_CARBONO = "DIOXIDO_CARBONO"
 
 # Nombre canónico → `variable` de la telemetría (nombres de modulo9). Se
 # amplía o corrige con EDGE_RF55_VARIABLES sin tocar código.
@@ -38,12 +42,26 @@ VARIABLES_DEFECTO = {
     HUMEDAD_RELATIVA: "humedad_relativa",
     TEMPERATURA_CORPORAL: "temperatura_corporal",
     FRECUENCIA_RESPIRATORIA: "frecuencia_respiratoria",
+    PH: "ph",
+    OXIGENO_DISUELTO: "oxigeno_disuelto",
+    AMONIACO: "nh3",
+    DIOXIDO_CARBONO: "co2",
+}
+
+# Rango físicamente posible por nombre canónico (TC-M03-081): una lectura fuera
+# de él es un dato malformado, no una desviación, y no se clasifica.
+RANGOS_FISICOS: dict[str, tuple[float, float]] = {
+    HUMEDAD_RELATIVA: (0.0, 100.0),
+    PH: (0.0, 14.0),
+    OXIGENO_DISUELTO: (0.0, math.inf),
+    AMONIACO: (0.0, math.inf),
+    DIOXIDO_CARBONO: (0.0, math.inf),
 }
 
 # (lecturas por nombre canónico, parámetros, severidad simple de una lectura)
 #   → (severidad o None, valores derivados, canónicas opcionales que escalaron)
 Evaluar = Callable[
-    [Mapping[str, "Reading"], Mapping[str, float], Callable[["Reading"], str | None]],
+    [Mapping[str, "Reading"], Mapping[str, Any], Callable[["Reading"], str | None]],
     tuple[str | None, dict[str, float], tuple[str, ...]],
 ]
 
@@ -54,7 +72,7 @@ class Formula:
     alias: frozenset[str]  # otros `nombre` normalizados que la eligen
     variables: tuple[str, ...]  # canónicas, todas requeridas dentro de la ventana
     opcionales: tuple[str, ...]  # canónicas que solo modifican el resultado
-    parametros: Callable[[Any], dict[str, float]]  # ValueError si no sirven
+    parametros: Callable[[Any], dict[str, Any]]  # ValueError si no sirven
     evaluar: Evaluar
 
 
@@ -95,7 +113,7 @@ def subir(severidad: str) -> str:
 
 # --- ESTRES_TERMICO --------------------------------------------------------
 
-_PARAMETROS_THI = {LEVE: 72.0, MODERADO: 79.0, CRITICO: 84.0, "temperatura_corporal_max": 40.0}
+_PARAMETROS_THI = {LEVE: 72.0, MODERADO: 78.0, CRITICO: 84.0, "temperatura_corporal_max": 40.0}
 
 
 def _parametros_thi(umbrales_severidad: Any) -> dict[str, float]:
@@ -113,12 +131,13 @@ def _parametros_thi(umbrales_severidad: Any) -> dict[str, float]:
 
 
 def thi(temperatura_f: float, humedad_relativa: float) -> float:
-    """THI = T - (0.55 - 0.0055 * HR) * (T - 14.5), con T en °F.
+    """THI del NRC (1971): T - (0.55 - 0.0055 * HR) * (T - 58), con T en °F.
 
-    Los cortes 72/79/84 son de la escala en °F: T=32.5 °C (90.5 °F) y HR=78 %
-    dan 81.3. Con T en °C la misma expresión daría ~30 y nunca dispararía.
+    Es la forma en °F de (1.8·Tc + 32) - (0.55 - 0.0055·HR)·(1.8·Tc - 26), la
+    escala de los cortes 72/78/84: 25 °C y 60 % dan 72.82. Con HR=100 % el THI
+    es exactamente la temperatura en °F.
     """
-    return temperatura_f - (0.55 - 0.0055 * humedad_relativa) * (temperatura_f - 14.5)
+    return temperatura_f - (0.55 - 0.0055 * humedad_relativa) * (temperatura_f - 58)
 
 
 def _fahrenheit(reading: Reading) -> float:
@@ -134,7 +153,7 @@ def _evaluar_thi(
     severidad_simple: Callable[[Reading], str | None],
 ) -> tuple[str | None, dict[str, float], tuple[str, ...]]:
     # Se clasifica con el mismo valor que se reporta: sin el redondeo, el
-    # residuo de punto flotante dejaría un THI de 79 en la banda de abajo.
+    # residuo de punto flotante dejaría un THI de 78 en la banda de abajo.
     indice = round(
         thi(_fahrenheit(lecturas[TEMPERATURA_AMBIENTAL]), lecturas[HUMEDAD_RELATIVA].valor_crudo),
         2,
@@ -164,4 +183,104 @@ ESTRES_TERMICO = Formula(
     evaluar=_evaluar_thi,
 )
 
-FORMULAS: dict[str, Formula] = {ESTRES_TERMICO.codigo: ESTRES_TERMICO}
+
+# --- CALIDAD_HIDRICA -------------------------------------------------------
+
+# Regla AND de TC-M03-106: pH fuera de [ph_min, ph_max] y OD < oxigeno_min. Los
+# límites del pH son permitidos (6.5 y 8.5 no disparan) y 5 mg/L tampoco.
+_PARAMETROS_HIDRICA: dict[str, Any] = {
+    "ph_min": 6.5,
+    "ph_max": 8.5,
+    "oxigeno_min": 5.0,
+    "severidad": CRITICO,
+}
+
+
+def _parametros_and(defectos: Mapping[str, Any], umbrales_severidad: Any) -> dict[str, Any]:
+    """Límites numéricos y `severidad` de una regla AND, sobre sus defaults."""
+    params = dict(defectos)
+    if umbrales_severidad is None:
+        return params
+    if not isinstance(umbrales_severidad, dict):
+        raise ValueError("umbrales_severidad debe ser un objeto")
+    for clave in params.keys() - {"severidad"}:
+        if clave in umbrales_severidad:
+            params[clave] = numero(umbrales_severidad[clave], f"umbrales_severidad.{clave}")
+    if "severidad" in umbrales_severidad:
+        if umbrales_severidad["severidad"] not in SEVERIDADES:
+            raise ValueError(f"umbrales_severidad.severidad debe ser una de {SEVERIDADES}")
+        params["severidad"] = umbrales_severidad["severidad"]
+    return params
+
+
+def _parametros_hidrica(umbrales_severidad: Any) -> dict[str, Any]:
+    params = _parametros_and(_PARAMETROS_HIDRICA, umbrales_severidad)
+    if not params["ph_min"] < params["ph_max"]:
+        raise ValueError("umbrales_severidad: ph_min debe ser menor que ph_max")
+    return params
+
+
+def _evaluar_hidrica(
+    lecturas: Mapping[str, Reading],
+    params: Mapping[str, Any],
+    severidad_simple: Callable[[Reading], str | None],
+) -> tuple[str | None, dict[str, float], tuple[str, ...]]:
+    ph = lecturas[PH].valor_crudo
+    oxigeno = lecturas[OXIGENO_DISUELTO].valor_crudo
+    ph_fuera = ph < params["ph_min"] or ph > params["ph_max"]
+    if ph_fuera and oxigeno < params["oxigeno_min"]:
+        return params["severidad"], {}, ()
+    return None, {}, ()
+
+
+CALIDAD_HIDRICA = Formula(
+    codigo="CALIDAD_HIDRICA",
+    alias=frozenset({"CALIDAD_DEL_AGUA", "CALIDAD_AGUA", "CALIDAD_HIDRICA_PH_OD"}),
+    variables=(PH, OXIGENO_DISUELTO),
+    opcionales=(),
+    parametros=_parametros_hidrica,
+    evaluar=_evaluar_hidrica,
+)
+
+
+# --- CALIDAD_AIRE (NH3 / CO2) ----------------------------------------------
+
+# Regla AND de TC-M03-085/105: NH3 > nh3_max y CO2 > co2_max (ppm). "Superar"
+# es estricto: 25 ppm de NH3 o 2000 ppm de CO2 no cumplen su condición.
+_PARAMETROS_AIRE: dict[str, Any] = {
+    "nh3_max": 25.0,
+    "co2_max": 2000.0,
+    "severidad": MODERADO,
+}
+
+
+def _parametros_aire(umbrales_severidad: Any) -> dict[str, Any]:
+    return _parametros_and(_PARAMETROS_AIRE, umbrales_severidad)
+
+
+def _evaluar_aire(
+    lecturas: Mapping[str, Reading],
+    params: Mapping[str, Any],
+    severidad_simple: Callable[[Reading], str | None],
+) -> tuple[str | None, dict[str, float], tuple[str, ...]]:
+    nh3 = lecturas[AMONIACO].valor_crudo
+    co2 = lecturas[DIOXIDO_CARBONO].valor_crudo
+    if nh3 > params["nh3_max"] and co2 > params["co2_max"]:
+        return params["severidad"], {}, ()
+    return None, {}, ()
+
+
+CALIDAD_AIRE = Formula(
+    codigo="CALIDAD_AIRE",
+    alias=frozenset(
+        {"CALIDAD_DEL_AIRE", "CORRELACION_NH3_CO2", "NH3_CO2", "AMONIACO_CO2", "GASES_NH3_CO2"}
+    ),
+    variables=(AMONIACO, DIOXIDO_CARBONO),
+    opcionales=(),
+    parametros=_parametros_aire,
+    evaluar=_evaluar_aire,
+)
+
+FORMULAS: dict[str, Formula] = {
+    f.codigo: f for f in (ESTRES_TERMICO, CALIDAD_HIDRICA, CALIDAD_AIRE)
+}

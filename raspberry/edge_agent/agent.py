@@ -19,13 +19,16 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import queue
 import threading
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import AbstractContextManager, ExitStack, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from itertools import groupby
 from typing import Any, Protocol
 
 from edge_agent import buffer as buf
@@ -43,9 +46,12 @@ from edge_agent.commands import (
 )
 from edge_agent.config import Settings
 from edge_agent.config_store import ConfigStore, UmbralStore
+from edge_agent.historial import RUTA_BUFFER, RUTA_DIRECTA, RUTA_LOCAL, Historial
 from edge_agent.mqtt_client import Connected, Event, Message, PubAck
+from edge_agent.reglas import disyuntor as dis
 from edge_agent.reglas import evento as ev
-from edge_agent.reglas.evaluador import evaluar_lote
+from edge_agent.reglas.disyuntor import Disyuntor
+from edge_agent.reglas.evaluador import evaluar_lote, lecturas_invalidas, normales
 from edge_agent.reglas.evento import EventoEdge
 from edge_agent.reglas.perfil import Habilitacion
 from edge_agent.reglas.store import ReglaStore
@@ -56,6 +62,11 @@ from edge_agent.system import ntp_sincronizado
 logger = logging.getLogger(__name__)
 
 _FLUSH_BATCH = 100
+# Tiempo máximo de capturas por vuelta del loop. Con una ráfaga (TC-M03-102:
+# muchos nodos vaciando su memoria a la vez) los nodos que no alcanzan quedan
+# vencidos para la vuelta siguiente y entretanto se atienden comandos y PUBACK.
+# Siempre se hace al menos una captura por vuelta.
+PRESUPUESTO_CAPTURAS_S = 0.2
 # Si paho no confirmó en este tiempo, la fila vuelve a ser elegible. Puede
 # causar un duplicado, que el servidor descarta por `event_id`.
 _INFLIGHT_TIMEOUT_S = 300
@@ -100,6 +111,7 @@ class Agent:
         umbrales: UmbralStore,
         reglas: ReglaStore,
         rf55: Habilitacion | None = None,
+        historial: Historial | None = None,
         reloj_sincronizado: Callable[[], bool] = ntp_sincronizado,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -110,6 +122,7 @@ class Agent:
         self._source = source
         self._umbrales = umbrales
         self._reglas = reglas
+        self._historial = historial
         # Sin `tipo_comando` es la configuración RF-23 (caso por defecto).
         self._comandos: dict[str, Callable[[str, dict[str, Any], float], dict[str, Any]]] = {
             TIPO_COMANDO_UMBRAL: self._on_umbral,
@@ -118,14 +131,20 @@ class Agent:
         self._reloj_sincronizado = reloj_sincronizado
         self._clock = clock
         self._inflight: dict[int, tuple[int, float]] = {}  # mid -> (row_id, enviado_en)
+        # mid -> (id_evento, origen) de los eventos en vuelo, para el historial.
+        self._eventos_en_vuelo: dict[int, tuple[str, str]] = {}
         self._last_reported: dict[str, str] = {}
-        # ERROR_CONFIGURACION ya emitidos, por (regla, id, versión): uno solo
-        # por configuración rota, no uno por lectura.
+        # ERROR_CONFIGURACION ya emitidos, por (regla, id, versión, variable):
+        # uno solo por configuración rota, no uno por lectura.
         self._errores_reportados: set[tuple[Any, ...]] = set()
         # RF-55.2 (opcional según el perfil de hardware): ventana de
         # correlación y confirmaciones, en memoria. None: solo RF-55.1.
         self._rf55 = rf55 or Habilitacion(True, ())
         self._compuestas = EstadoCompuestas() if self._rf55.rf55_2 else None
+        # Capturas vencidas que no entraron en el presupuesto de la vuelta.
+        self._capturas_pendientes = False
+        # Fallas de evaluación en tiempo de ejecución (TC-M03-088/097).
+        self._disyuntor = Disyuntor(settings.rf55_2_fallos_max, settings.rf55_2_reintento_s)
         now = clock()
         self._schedules = {
             serial: self._initial_schedule(serial, now) for serial in settings.serials
@@ -154,14 +173,29 @@ class Agent:
             if on_loop is not None:
                 on_loop()
             try:
-                event = events.get(timeout=0.5)
+                # Con capturas atrasadas por el presupuesto no se espera a la red.
+                event = events.get(block=not self._capturas_pendientes, timeout=0.5)
             except queue.Empty:
                 pass
             else:
-                self.handle_event(event, self._clock())
+                pendientes = [event]
                 while not events.empty():
-                    self.handle_event(events.get_nowait(), self._clock())
+                    pendientes.append(events.get_nowait())
+                self.handle_events(pendientes)
             self.tick(self._clock())
+
+    def handle_events(self, eventos: list[Event]) -> None:
+        """Eventos en el orden en que llegaron.
+
+        Cada racha de PUBACK seguidos se confirma en una sola transacción: tras
+        una ráfaga son miles y cada borrado suelto esperaría al disco
+        (TC-M03-102). El resto va uno por uno: un comando publica su ACK
+        apenas lo guarda.
+        """
+        for es_puback, grupo in groupby(eventos, key=lambda e: isinstance(e, PubAck)):
+            with self._lote() if es_puback else nullcontext():
+                for event in grupo:
+                    self.handle_event(event, self._clock())
 
     def handle_event(self, event: Event, now: float) -> None:
         match event:
@@ -175,14 +209,25 @@ class Agent:
                 entry = self._inflight.pop(mid, None)
                 if entry is not None:
                     self._buffer.delete(entry[0])
+                enviado = self._eventos_en_vuelo.pop(mid, None)
+                if enviado is not None and self._historial is not None:
+                    self._historial.marcar_enviado(enviado[0], origen=enviado[1], ahora=now)
             case _:
                 pass  # Disconnected: paho reintenta solo y el buffer retiene.
 
     def tick(self, now: float) -> None:
+        inicio = time.perf_counter()
+        capturadas = 0
+        self._capturas_pendientes = False
         for serial, sched in self._schedules.items():
             cfg = self._store.get(serial)
             if now >= sched.next_capture:
+                if capturadas and time.perf_counter() - inicio > PRESUPUESTO_CAPTURAS_S:
+                    # Queda vencida (con su agenda intacta) para la vuelta siguiente.
+                    self._capturas_pendientes = True
+                    continue
                 self._capture(serial, sched.next_tx, now)
+                capturadas += 1
                 sched.next_capture = _advance(
                     sched.next_capture, cfg.frecuencia_captura_min * 60, now
                 )
@@ -197,6 +242,11 @@ class Agent:
                 if now >= sched.next_heartbeat:
                     self._send_heartbeat(serial, now)
         self._report_sync_finished(now)
+
+    @property
+    def capturas_pendientes(self) -> bool:
+        """Quedaron capturas vencidas para la vuelta siguiente (ráfaga, TC-M03-102)."""
+        return self._capturas_pendientes
 
     def capturar_ahora(self, serial: str, now: float) -> None:
         """Captura fuera de agenda y vacía el buffer: la usa el inyector de QA
@@ -344,10 +394,36 @@ class Agent:
 
     # --- telemetría y buffer --------------------------------------------
 
+    def _lote(self) -> AbstractContextManager[None]:
+        """Buffer e historial en una transacción cada uno: un fsync por bloque."""
+        pila = ExitStack()
+        pila.enter_context(self._buffer.lote())
+        if self._historial is not None:
+            pila.enter_context(self._historial.lote())
+        return pila
+
     def _capture(self, serial: str, due_at: float, now: float) -> None:
+        # Todo lo que escribe una captura va junto: una ráfaga de cientos de
+        # lecturas no hace un fsync por fila (TC-M03-102).
+        with self._lote():
+            self._capturar(serial, due_at, now)
+
+    def _capturar(self, serial: str, due_at: float, now: float) -> None:
         readings = self._source.read(serial, _utc(now))
+        invalidas = lecturas_invalidas(readings, self._settings.rf55_variables)
+        for reading, motivo in invalidas:
+            logger.warning(
+                "Lectura de %s descartada para RF-55 (%s): %s",
+                reading.serial,
+                reading.variable,
+                motivo,
+            )
+            if self._historial is not None:
+                self._historial.registrar_invalida(reading, motivo=motivo, ahora=now)
         # Las lecturas crudas primero: si el motor de reglas falla, ya están a salvo.
         for reading in readings:
+            if not _es_finito(reading.valor_crudo):
+                continue  # NaN/None/texto no es telemetría (ni JSON válido)
             self._buffer.enqueue(
                 serial=serial,
                 kind=buf.KIND_TELEMETRY,
@@ -359,20 +435,77 @@ class Agent:
         try:
             # La captura completa junta: una compuesta ve las variables que
             # llegaron juntas y prevalece sobre los simples de esas lecturas.
+            compuestas = self._compuestas if self._disyuntor_permite(now) else None
             eventos = evaluar_lote(
                 readings,
                 self._umbrales.todos(),
                 self._reglas.activas(),
-                estado=self._compuestas,
+                estado=compuestas,
                 variables=self._settings.rf55_variables,
                 ahora=_utc(now),
                 version_firmware=self._settings.firmware_version,
             )
+            if compuestas is not None:
+                self._registrar_rf55_2(compuestas.fallo, now)
             for evento in eventos:
                 self._encolar_evento(evento, now)
+            if self._historial is not None:
+                for reading, umbral in normales(readings, self._umbrales.todos(), eventos):
+                    self._historial.registrar_normal(
+                        reading, id_umbral=umbral.id_umbral_ambiental, ahora=now
+                    )
         except Exception:
             # Un fallo de RF-55 nunca puede tumbar la captura ni el servicio.
             logger.exception("Falló la evaluación RF-55 de %s", serial)
+
+    @property
+    def estado_rf55_2(self) -> dict[str, Any]:
+        """Estado observable de RF-55.2 (inyector de QA y diagnóstico)."""
+        return {
+            "habilitado_por_hardware": self._rf55.rf55_2,
+            "motivos_hardware": list(self._rf55.motivos),
+            "operativo": self._rf55_2_operativo(),
+            **self._disyuntor.resumen(),
+        }
+
+    def _rf55_2_operativo(self) -> bool:
+        return self._rf55.rf55_2 and self._disyuntor.estado == dis.ACTIVO
+
+    def _disyuntor_permite(self, now: float) -> bool:
+        return self._compuestas is not None and self._disyuntor.permite(now)
+
+    def _registrar_rf55_2(self, fallo: Exception | None, now: float) -> None:
+        transicion = self._disyuntor.registrar(fallo, now)
+        d = self._disyuntor
+        if transicion == dis.TRANSITORIO:
+            logger.warning(
+                "RF-55.2 falló en esta captura (%d/%d seguidas): se clasifica con RF-55.1. %r",
+                d.fallos_consecutivos,
+                d.fallos_max,
+                fallo,
+            )
+        elif transicion == dis.DESHABILITA:
+            logger.error(
+                "RF-55.2 DESHABILITADO tras %d fallas seguidas; RF-55.1 sigue. "
+                "Reintento en %g s. Última falla: %r",
+                d.fallos_consecutivos,
+                d.reintento_s,
+                fallo,
+            )
+        elif transicion == dis.REINTENTO_FALLIDO:
+            logger.warning(
+                "RF-55.2 sigue DESHABILITADO: el reintento falló (%r). Próximo en %g s",
+                fallo,
+                d.reintento_s,
+            )
+        elif transicion == dis.REACTIVA:
+            logger.warning("RF-55.2 REACTIVADO: el reintento evaluó sin fallas")
+        if transicion in (dis.DESHABILITA, dis.REACTIVA):
+            # Una ventana a medias de antes de la falla no debe correlacionar.
+            self._compuestas = EstadoCompuestas()
+            if self._link.connected:  # el cambio se ve ya en el heartbeat
+                for serial in self._settings.serials:
+                    self._send_heartbeat(serial, now)
 
     def _encolar_evento(self, evento: EventoEdge, now: float) -> None:
         if evento.clasificacion == ev.ERROR_CONFIGURACION:
@@ -381,20 +514,37 @@ class Agent:
                 meta.get("regla_aplicada"),
                 meta.get("id_umbral_ambiental", meta.get("id_regla_alerta")),
                 meta.get("version_umbral", meta.get("version_regla")),
+                meta.get("variable"),
             )
             if clave in self._errores_reportados:
+                # Ya se publicó: las lecturas siguientes solo quedan en el
+                # historial local, sin clasificación (TC-M03-083/122).
+                if self._historial is not None:
+                    self._historial.registrar_evento(
+                        ev.a_payload(evento, estado_conectividad=self._link.connected),
+                        ruta=RUTA_LOCAL,
+                        ahora=now,
+                    )
                 return
             self._errores_reportados.add(clave)
-            logger.warning("RF-55: configuración inutilizable %s", clave)
+            logger.warning("RF-55: configuración inutilizable %s: %s", clave, meta.get("motivo"))
+        # Todo evento pasa por el buffer, también con conexión (RF-56): la fila
+        # se borra con el PUBACK y así un corte a mitad de envío no lo pierde.
+        # Con conexión sale en este mismo ciclo (ruta DIRECTA, origen TIEMPO_REAL).
+        conectado = self._link.connected
+        payload = ev.a_payload(evento, estado_conectividad=conectado)
         # El serial es el del nodo dueño de la variable primaria, no el del Gateway.
         self._buffer.enqueue(
             serial=evento.serial,
             kind=buf.KIND_EVENTO,
             topic=self._settings.topic(evento.serial, self._settings.topic_evento),
-            payload=ev.a_payload(evento, estado_conectividad=self._link.connected),
+            payload=payload,
             due_at=now,  # los eventos no esperan la ventana de transmisión
             now=now,
         )
+        if self._historial is not None:
+            ruta = RUTA_DIRECTA if conectado else RUTA_BUFFER
+            self._historial.registrar_evento(payload, ruta=ruta, ahora=now)
 
     def _flush(self, now: float) -> None:
         if not self._link.connected:
@@ -415,12 +565,21 @@ class Agent:
                         payload.get("metadata_edge", {}).get("id_evento"),
                     )
                     self._buffer.delete(row.id)
+                    if self._historial is not None:
+                        self._historial.marcar_descartado(
+                            payload["metadata_edge"]["id_evento"],
+                            motivo="TIMESTAMP_EXPIRADO",
+                            ahora=now,
+                        )
                     continue
                 payload = {**payload, "origen": ev.BUFFER_LOCAL if late else ev.TIEMPO_REAL}
             mid = self._link.publish(row.topic, json.dumps(payload).encode("utf-8"))
             if mid is None:
                 break
             self._inflight[mid] = (row.id, now)
+            if row.kind == buf.KIND_EVENTO:
+                id_evento = payload["metadata_edge"]["id_evento"]
+                self._eventos_en_vuelo[mid] = (id_evento, payload["origen"])
 
     def _sending(self) -> set[int]:
         return {row_id for row_id, _ in self._inflight.values()}
@@ -429,6 +588,7 @@ class Agent:
         for mid, (_, sent_at) in list(self._inflight.items()):
             if now - sent_at > _INFLIGHT_TIMEOUT_S:
                 del self._inflight[mid]
+                self._eventos_en_vuelo.pop(mid, None)
 
     # --- heartbeat ------------------------------------------------------
 
@@ -462,9 +622,10 @@ class Agent:
         }
         payload.update({k: v for k, v in self._source.status(serial).items() if v is not None})
         # RF-55.2 activo o no, por el campo de D11 que el broker ya acepta.
+        # `operativo` es falso si se apagó por hardware o lo abrió el disyuntor.
         payload["sensores_operativos"] = [
             *payload.get("sensores_operativos", []),
-            self._rf55.sensor_operativo(),
+            {**self._rf55.sensor_operativo(), "operativo": self._rf55_2_operativo()},
         ]
         topic = self._settings.topic(serial, self._settings.topic_heartbeat)
         if self._link.publish(topic, json.dumps(payload).encode("utf-8")) is not None:
@@ -533,6 +694,10 @@ def _telemetry_payload(reading: Reading) -> dict[str, Any]:
     }
     payload.update({k: v for k, v in optional.items() if v is not None})
     return payload
+
+
+def _es_finito(valor: Any) -> bool:
+    return isinstance(valor, int | float) and not isinstance(valor, bool) and math.isfinite(valor)
 
 
 def _utc(ts: float) -> datetime:

@@ -98,6 +98,17 @@ class Settings:
     rf55_variables: dict[str, str] = field(default_factory=dict)
     # Fuerza RF-55.2 apagado aunque el hardware alcance (pruebas).
     rf55_2_deshabilitar: bool = False
+    # Historial local de clasificaciones (TC-M03-100): filas que se retienen.
+    historial_max_filas: int = 20_000
+    # Disyuntor de RF-55.2 (TC-M03-088/097): capturas seguidas con falla que lo
+    # deshabilitan y segundos hasta reintentarlo.
+    rf55_2_fallos_max: int = 3
+    rf55_2_reintento_s: float = 600.0
+
+    @property
+    def historial_path(self) -> Path:
+        """Junto al buffer, en archivo propio: el buffer borra al confirmar."""
+        return self.buffer_path.with_name("historial.db")
 
     def topic(self, serial: str, suffix: str) -> str:
         return f"{self.topic_prefix}/{serial}/{suffix}"
@@ -155,6 +166,9 @@ class Settings:
             topic_evento=env.get("EDGE_TOPIC_EVENTO", "evento"),
             rf55_variables=_parse_rf55_variables(env.get("EDGE_RF55_VARIABLES", "")),
             rf55_2_deshabilitar=_int_in(env, "EDGE_RF55_2_DESHABILITAR", "0", 0, 1) == 1,
+            historial_max_filas=_int(env, "EDGE_HISTORIAL_MAX_FILAS", 20_000),
+            rf55_2_fallos_max=_int(env, "EDGE_RF55_2_FALLOS_MAX", 3),
+            rf55_2_reintento_s=_positive_float(env, "EDGE_RF55_2_REINTENTO_S", 600.0),
         )
 
 

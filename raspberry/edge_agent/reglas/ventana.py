@@ -97,3 +97,5 @@ class Confirmaciones:
 class EstadoCompuestas:
     ventana: Ventana = field(default_factory=Ventana)
     confirmaciones: Confirmaciones = field(default_factory=Confirmaciones)
+    # Falla de RF-55.2 en la última captura evaluada (None si evaluó bien).
+    fallo: Exception | None = None

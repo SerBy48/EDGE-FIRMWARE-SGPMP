@@ -12,7 +12,7 @@ from edge_agent.config import ConfigError, Settings
 from edge_agent.config_store import Umbral
 from edge_agent.mqtt_client import Message
 from edge_agent.reglas import formulas
-from edge_agent.reglas.evaluador import evaluar_lote, validar_regla
+from edge_agent.reglas.evaluador import SIN_UMBRAL, evaluar_lote, validar_regla
 from edge_agent.reglas.evento import a_payload
 from edge_agent.reglas.store import Regla
 from edge_agent.reglas.ventana import EstadoCompuestas, Ventana
@@ -80,8 +80,10 @@ UMBRAL_FR = umbral(
 )
 
 
-def evaluar(lecturas, reglas=(), umbrales=(), estado=None, ahora=AHORA, variables=None):
-    return evaluar_lote(
+def evaluar(
+    lecturas, reglas=(), umbrales=(), estado=None, ahora=AHORA, variables=None, sin_umbral=False
+):
+    eventos = evaluar_lote(
         lecturas,
         list(umbrales),
         list(reglas),
@@ -90,6 +92,10 @@ def evaluar(lecturas, reglas=(), umbrales=(), estado=None, ahora=AHORA, variable
         ahora=ahora,
         version_firmware="v0.3.0",
     )
+    # Estas pruebas son de RF-55.2 y no configuran umbral RF-17 para todas sus
+    # variables: el ERROR_CONFIGURACION de una variable sin umbral (TC-M03-083)
+    # se prueba en test_errores_configuracion.py.
+    return eventos if sin_umbral else [e for e in eventos if e.metadata.get("motivo") != SIN_UMBRAL]
 
 
 def compuestas(eventos):
@@ -99,11 +105,11 @@ def compuestas(eventos):
 # --- Tipo B: ESTRES_TERMICO --------------------------------------------------
 
 
-def test_vector_thi_de_referencia_es_moderado():
+def test_vector_thi_de_referencia_es_critico():
     (evento,) = evaluar(ambiente(32.5, 78.0), [regla()])
 
-    assert (evento.clasificacion, evento.severidad) == ("DESVIACION_COMPUESTA", "MODERADO")
-    assert evento.metadata["valores_derivados"]["THI"] == pytest.approx(81.3, abs=0.01)
+    assert (evento.clasificacion, evento.severidad) == ("DESVIACION_COMPUESTA", "CRITICO")
+    assert evento.metadata["valores_derivados"]["THI"] == pytest.approx(86.57, abs=0.01)
     payload = a_payload(evento)
     meta = payload["metadata_edge"]
     assert meta["regla_aplicada"] == "ESTRES_TERMICO"
@@ -116,13 +122,24 @@ def test_vector_thi_de_referencia_es_moderado():
     ]
 
 
+def test_ejemplo_qa_25c_60hr_es_leve():
+    # TC-M03-084: (1.8·25 + 32) - (0.55 - 0.0055·60)·(1.8·25 - 26) = 72.82.
+    (evento,) = evaluar(ambiente(25.0, 60.0), [regla()])
+    assert evento.severidad == "LEVE"
+    assert evento.metadata["valores_derivados"]["THI"] == pytest.approx(72.82, abs=0.01)
+    assert evento.metadata["regla_aplicada"] == "ESTRES_TERMICO"
+
+
 @pytest.mark.parametrize(
     ("thi", "severidad"),
     [
+        (71.9, None),  # matriz de límites de QA (TC-M03-104)
         (71.99, None),
         (72.0, "LEVE"),
-        (78.99, "LEVE"),
-        (79.0, "MODERADO"),
+        (77.9, "LEVE"),
+        (77.99, "LEVE"),
+        (78.0, "MODERADO"),
+        (83.9, "MODERADO"),
         (83.99, "MODERADO"),
         (84.0, "CRITICO"),
         (95.0, "CRITICO"),
@@ -135,9 +152,9 @@ def test_cada_corte_cae_en_una_sola_banda(thi, severidad):
 
 
 def test_umbrales_severidad_parametriza_los_cortes():
-    cuerpo = {**THI, "umbrales_severidad": {"LEVE": "70", "MODERADO": 75, "CRITICO": "80.5"}}
-    (evento,) = evaluar(ambiente(32.5, 78.0), [regla(cuerpo)])  # THI 81.3
-    assert evento.severidad == "CRITICO"
+    cuerpo = {**THI, "umbrales_severidad": {"LEVE": "70", "MODERADO": 75, "CRITICO": "90.5"}}
+    (evento,) = evaluar(ambiente(32.5, 78.0), [regla(cuerpo)])  # THI 86.57: CRITICO por defecto
+    assert evento.severidad == "MODERADO"
 
 
 @pytest.mark.parametrize(
@@ -212,6 +229,86 @@ def test_compuesta_que_dispara_prevalece_sobre_el_simple():
     assert sorted(e.clasificacion for e in eventos) == ["DESVIACION_COMPUESTA", "DESVIACION_SIMPLE"]
 
 
+def _umbral_t(normal, precaucion, critico):
+    return umbral(
+        "temperatura_ambiente",
+        [("normal", *normal), ("precaucion", *precaucion), ("critico", *critico)],
+    )
+
+
+@pytest.mark.parametrize(
+    ("cuerpo", "lecturas", "umbral_t", "esperada", "regla_sev", "simple_sev", "origen"),
+    [
+        # TC-M03-089, vector de QA: Tipo A MODERADO y T 32.5 °C crítica en RF-55.1.
+        (
+            {**VENTANA_A, "lectura_confirmacion_max": 1},
+            [lectura("temperatura_ambiente", 32.5)],
+            UMBRAL_T,
+            "CRITICO",
+            "MODERADO",
+            "CRITICO",
+            "RF-55.1",
+        ),
+        # THI 72.82 LEVE; los 25 °C ya son críticos en el umbral simple.
+        (
+            THI,
+            ambiente(25.0, 60.0),
+            _umbral_t((0, 15), (15, 20), (20, 30)),
+            "CRITICO",
+            "LEVE",
+            "CRITICO",
+            "RF-55.1",
+        ),
+        # THI 86.57 CRITICO; el simple solo es MODERADO: decide RF-55.2.
+        (
+            THI,
+            ambiente(),
+            _umbral_t((10, 25), (25, 35), (35, 40)),
+            "CRITICO",
+            "CRITICO",
+            "MODERADO",
+            "RF-55.2",
+        ),
+        # Empate: decide RF-55.2.
+        (THI, ambiente(), UMBRAL_T, "CRITICO", "CRITICO", "CRITICO", "RF-55.2"),
+        # La lectura está en banda normal: no hay severidad RF-55.1.
+        (
+            THI,
+            ambiente(25.0, 60.0),
+            _umbral_t((10, 30), (30, 35), (35, 40)),
+            "LEVE",
+            "LEVE",
+            None,
+            "RF-55.2",
+        ),
+    ],
+)
+def test_compuesta_que_prevalece_conserva_la_maxima_severidad(
+    cuerpo, lecturas, umbral_t, esperada, regla_sev, simple_sev, origen
+):
+    (evento,) = evaluar(lecturas, [regla(cuerpo)], [umbral_t])
+    assert (evento.clasificacion, evento.severidad) == ("DESVIACION_COMPUESTA", esperada)
+    meta = a_payload(evento)["metadata_edge"]
+    assert a_payload(evento)["severidad"] == esperada
+    assert (meta["severidad_regla"], meta["severidad_rf55_1"], meta["severidad_origen"]) == (
+        regla_sev,
+        simple_sev,
+        origen,
+    )
+    assert meta["id_regla_alerta"] == 12  # la clasificación sigue siendo de la regla
+
+
+def test_sin_prevalencia_cada_evaluacion_conserva_su_severidad():
+    # Sin `prevalece_sobre_regla_simple` salen los dos eventos: la máxima ya viaja.
+    cuerpo = {**VENTANA_A, "lectura_confirmacion_max": 1, "prevalece_sobre_regla_simple": False}
+    eventos = evaluar([lectura("temperatura_ambiente", 32.5)], [regla(cuerpo)], [UMBRAL_T])
+    assert sorted((e.clasificacion, e.severidad) for e in eventos) == [
+        ("DESVIACION_COMPUESTA", "MODERADO"),
+        ("DESVIACION_SIMPLE", "CRITICO"),
+    ]
+    assert all("severidad_origen" not in e.metadata for e in eventos)
+
+
 def test_compuesta_que_no_dispara_deja_pasar_el_simple():
     t = umbral(
         "temperatura_ambiente", [("normal", 0, 10), ("precaucion", 10, 15), ("critico", 15, 18)]
@@ -225,7 +322,7 @@ def test_mapa_de_variables_configurable():
     assert evaluar(lecturas, [regla()]) == []
     mapa = {"TEMPERATURA_AMBIENTAL": "temp_aire", "HUMEDAD_RELATIVA": "hr_aire"}
     (evento,) = evaluar(lecturas, [regla()], variables=mapa)
-    assert evento.severidad == "MODERADO"
+    assert evento.severidad == "CRITICO"
 
 
 def test_una_evaluacion_por_nodo_y_captura():
@@ -339,8 +436,42 @@ def test_formula_con_4_variables_se_rechaza(monkeypatch):
     )
     monkeypatch.setitem(formulas.FORMULAS, "CUATRO", cuatro)
     resultado = handle_regla(comando({"nombre": "cuatro"}), None)
+    assert resultado.regla is None
     assert resultado.ack["resultado"] == "ERROR"
     assert "máximo 3" in resultado.ack["motivo"]
+
+
+def test_formula_con_1_variable_se_rechaza(monkeypatch):
+    # TC-M03-107 E1: una sola variable no es una correlación.
+    una = formulas.Formula(
+        codigo="UNA",
+        alias=frozenset(),
+        variables=("A",),
+        opcionales=("B", "C"),  # las opcionales no completan el mínimo
+        parametros=lambda _: {},
+        evaluar=lambda *_: (formulas.CRITICO, {}, ()),
+    )
+    monkeypatch.setitem(formulas.FORMULAS, "UNA", una)
+    resultado = handle_regla(comando({"nombre": "una"}), None)
+    assert resultado.regla is None
+    assert resultado.ack["resultado"] == "ERROR"
+    assert "mínimo 2" in resultado.ack["motivo"]
+    # Guardada por otra versión del firmware: no se evalúa como compuesta.
+    (evento,) = evaluar([lectura("A", 1.0)], [regla({"nombre": "una"})], variables={"A": "A"})
+    assert evento.clasificacion == "ERROR_CONFIGURACION"
+
+
+def test_cardinalidad_cuenta_solo_las_variables_requeridas():
+    # THI: 2 requeridas + 2 opcionales; el catálogo publicado respeta [2, 3].
+    assert validar_regla(THI) is None
+    for formula in formulas.FORMULAS.values():
+        assert 2 <= len(formula.variables) <= 3, formula.codigo
+
+
+def test_tipo_a_con_una_variable_no_aplica_cardinalidad():
+    # Tipo A confirma una variable en el tiempo; no es una correlación.
+    assert validar_regla(VENTANA_A) is None
+    assert handle_regla(comando(VENTANA_A), None).ack["resultado"] == "OK"
 
 
 @pytest.mark.parametrize(
@@ -379,7 +510,9 @@ def test_regla_guardada_mal_formada_es_error_de_configuracion_sin_excepcion():
     assert "umbral_min" in evento.metadata["motivo"]
 
 
-def test_excepcion_dentro_de_una_formula_es_error_de_configuracion(monkeypatch):
+def test_excepcion_dentro_de_una_formula_es_falla_de_rf55_2(monkeypatch):
+    # Una regla válida que revienta al evaluar no es ERROR_CONFIGURACION: es una
+    # falla de RF-55.2; la captura se clasifica con RF-55.1 (TC-M03-097).
     def explota(*_):
         raise ZeroDivisionError("bug")
 
@@ -387,8 +520,10 @@ def test_excepcion_dentro_de_una_formula_es_error_de_configuracion(monkeypatch):
         "ROTA", frozenset(), formulas.ESTRES_TERMICO.variables, (), lambda _: {}, explota
     )
     monkeypatch.setitem(formulas.FORMULAS, "ROTA", rota)
-    eventos = evaluar(ambiente(), [regla({"nombre": "rota"})])
-    assert [e.clasificacion for e in eventos] == ["ERROR_CONFIGURACION"]
+    estado = EstadoCompuestas()
+    eventos = evaluar(ambiente(), [regla({"nombre": "rota"})], [UMBRAL_T], estado=estado)
+    assert [e.clasificacion for e in eventos] == ["DESVIACION_SIMPLE"]
+    assert isinstance(estado.fallo, ZeroDivisionError)
 
 
 def test_rf55_2_deshabilitado_solo_evalua_simples():
@@ -401,6 +536,7 @@ def test_rf55_2_deshabilitado_solo_evalua_simples():
         ahora=AHORA,
         version_firmware="v",
     )
+    eventos = [e for e in eventos if e.metadata.get("motivo") != SIN_UMBRAL]  # HR sin umbral
     assert [e.clasificacion for e in eventos] == ["DESVIACION_SIMPLE"]
 
 
@@ -471,8 +607,8 @@ def test_agente_recibe_la_regla_y_publica_el_evento_compuesto(tmp_path):
     h.advance(0)
     (evento,) = h.link.on("evento")
     assert evento["clasificacion_rf55"] == "DESVIACION_COMPUESTA"
-    assert evento["severidad"] == "MODERADO"
-    assert evento["metadata_edge"]["valores_derivados"]["THI"] == pytest.approx(81.3, abs=0.01)
+    assert evento["severidad"] == "CRITICO"
+    assert evento["metadata_edge"]["valores_derivados"]["THI"] == pytest.approx(86.57, abs=0.01)
     h.buffer.close()
 
 

@@ -10,7 +10,9 @@ semáforo del backend:
 - un valor en el límite entre dos bandas cae en la más grave;
 - fuera de todas las bandas es crítico (el ROJO de la plataforma);
 - con varios umbrales para la variable (una especie por umbral) rige el más
-  restrictivo (RFC-012).
+  restrictivo (RFC-012);
+- un umbral que no cumple esa forma, o una variable sin umbral, no se
+  clasifica: es ERROR_CONFIGURACION con `severidad_invalida` (TC-M03-083/095/122).
 
 RF-55.2, reglas de `modulo3.reglas_alertas` (§6 del documento de contratos):
 - Tipo B: el `nombre` elige una fórmula del catálogo cerrado (`formulas.py`)
@@ -19,7 +21,8 @@ RF-55.2, reglas de `modulo3.reglas_alertas` (§6 del documento de contratos):
   umbral_max] que se repite `lectura_confirmacion_max` veces dentro de
   `ventana_confirmacion_min` minutos (es lo que el esquema sí expresa).
 Una compuesta que dispara con `prevalece_sobre_regla_simple` suprime el
-DESVIACION_SIMPLE de sus mismas lecturas (RF-57 E14/E15).
+DESVIACION_SIMPLE de sus mismas lecturas (RF-57 E14/E15), pero conserva la
+severidad más grave de las dos evaluaciones (TC-M03-089).
 """
 
 from __future__ import annotations
@@ -27,14 +30,16 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
+from itertools import pairwise
 from typing import Any
 
 from edge_agent.config_store import Umbral
 from edge_agent.reglas import evento as ev
 from edge_agent.reglas.evento import EventoEdge
 from edge_agent.reglas.formulas import (
+    RANGOS_FISICOS,
     SEVERIDADES,
     VARIABLES_DEFECTO,
     Formula,
@@ -48,9 +53,18 @@ from edge_agent.sources import Reading
 REGLA_UMBRAL = "UMBRAL_AMBIENTAL"
 REGLA_VENTANA = "VENTANA_CONFIRMACION"
 FUERA_DE_RANGO = "fuera_de_rango"
+SIN_UMBRAL = "sin umbral RF-17 para la variable en este Edge"
+# `severidad_origen` de una compuesta que prevalece: qué evaluación fijó la severidad.
+ORIGEN_RF55_1 = "RF-55.1"
+ORIGEN_RF55_2 = "RF-55.2"
 
 # Límites duros de RF-55.2: se rechazan al recibir la regla, no al evaluarla.
 MAX_REGLAS_ACTIVAS = 5
+# Cardinalidad de una correlación Tipo B (TC-M03-086/107): cuenta las variables
+# requeridas de la fórmula; las opcionales solo modifican el resultado y no
+# cuentan (THI: 2 requeridas + 2 opcionales). Tipo A no correlaciona: confirma
+# una variable en el tiempo y no se le aplica.
+MIN_VARIABLES_POR_REGLA = 2
 MAX_VARIABLES_POR_REGLA = 3
 # Acota la memoria de las confirmaciones Tipo A (no es un límite de RF-55.2).
 MAX_LECTURAS_CONFIRMACION = 100
@@ -94,30 +108,41 @@ def evaluar_simple(
     ahora: datetime,
     version_firmware: str,
 ) -> EventoEdge | None:
-    """Evento de la lectura, o None si está en rango o no hay umbral para su variable.
+    """Evento de la lectura, o None si está en la banda `normal` de su umbral.
 
-    Sin umbral para la variable no hay nada que evaluar y no es error (al
-    arrancar sin `umbrales.json`, toda lectura estaría en ese caso). Sí lo es
-    un umbral que existe pero no se puede usar: `ERROR_CONFIGURACION`.
+    Sin umbral usable no se inventa una severidad (TC-M03-083/095/122): la
+    variable sin ningún umbral o con uno que no cumple la forma de RF-17
+    (`motivo_niveles`) es `ERROR_CONFIGURACION` con `severidad_invalida`. La
+    lectura cruda igual sale como telemetría; el agente publica el error una
+    vez por variable o por umbral y versión.
     """
+    if not _es_numero(reading.valor_crudo):
+        return None
     inicio = time.perf_counter()
     peor, mal_formado = _peor_nivel(reading, umbrales)
+    metadata: dict[str, Any] = {"regla_aplicada": REGLA_UMBRAL}
     if peor is not None and peor[0] != "normal":
         nivel, umbral = peor
         clasificacion, severidad = ev.DESVIACION_SIMPLE, _SEVERIDAD[nivel]
-    elif mal_formado is not None:
-        nivel, umbral = None, mal_formado
+        metadata |= {
+            "id_umbral_ambiental": umbral.id_umbral_ambiental,
+            "version_umbral": umbral.version,
+            "nivel_umbral": nivel,
+        }
+    elif mal_formado is not None or peor is None:
         clasificacion, severidad = ev.ERROR_CONFIGURACION, None
+        if mal_formado is not None:
+            umbral, motivo = mal_formado
+            metadata |= {
+                "id_umbral_ambiental": umbral.id_umbral_ambiental,
+                "version_umbral": umbral.version,
+            }
+        else:
+            metadata |= {"id_umbral_ambiental": None, "version_umbral": None}
+            motivo = SIN_UMBRAL
+        metadata |= {"variable": reading.variable, "motivo": motivo, "severidad_invalida": True}
     else:
         return None
-
-    metadata: dict[str, Any] = {
-        "regla_aplicada": REGLA_UMBRAL,
-        "id_umbral_ambiental": umbral.id_umbral_ambiental,
-        "version_umbral": umbral.version,
-    }
-    if nivel is not None:
-        metadata["nivel_umbral"] = nivel
     return ev.nuevo_evento(
         clasificacion,
         severidad,
@@ -154,26 +179,107 @@ def clasificar(valor: float, niveles: Sequence[Any]) -> str | None:
     return max(dentro, key=_GRAVEDAD.__getitem__)
 
 
+def motivo_niveles(valor_min: Any, valor_max: Any, niveles: Any) -> str | None:
+    """Por qué un umbral RF-17 no sirve para clasificar, o None si sirve.
+
+    Es la forma que exige el backend (rechaza otra con SOLAPAMIENTO_NIVELES):
+    las tres bandas `normal`/`precaucion`/`critico`, una vez cada una, de ancho
+    > 0, contiguas y cubriendo [valor_min, valor_max]. Con una banda faltante,
+    en cero o con huecos, lo que cae fuera de la `normal` saldría CRITICO sin
+    que nadie lo haya definido (TC-M03-095/122). Se aplica al recibir el umbral
+    (ACK_UMBRAL) y otra vez al evaluar uno ya guardado.
+    """
+    if not (_es_numero(valor_min) and _es_numero(valor_max) and valor_min < valor_max):
+        return "valor_min y valor_max deben ser números con valor_min < valor_max"
+    if not isinstance(niveles, list | tuple) or not niveles:
+        return "niveles debe traer normal/precaucion/critico con límites numéricos"
+    bandas = []
+    for nivel in niveles:
+        if not isinstance(nivel, Mapping) or nivel.get("nivel") not in _NIVELES:
+            return "niveles debe traer normal/precaucion/critico con límites numéricos"
+        nombre = nivel["nivel"]
+        inferior, superior = nivel.get("limite_inferior"), nivel.get("limite_superior")
+        if not (_es_numero(inferior) and _es_numero(superior)):
+            return "niveles debe traer normal/precaucion/critico con límites numéricos"
+        if not inferior < superior:
+            return f"la banda {nombre} debe tener ancho mayor que 0 ({inferior:g}–{superior:g})"
+        bandas.append((inferior, superior, nombre))
+    if sorted(b[2] for b in bandas) != sorted(_NIVELES):
+        return "niveles debe traer normal, precaucion y critico, una vez cada uno"
+    bandas.sort()
+    if not (_igual(bandas[0][0], valor_min) and _igual(bandas[-1][1], valor_max)):
+        return "las bandas deben cubrir exactamente [valor_min, valor_max]"
+    for (_, fin, una), (comienzo, _, otra) in pairwise(bandas):
+        if not _igual(fin, comienzo):
+            return f"las bandas {una} y {otra} deben ser contiguas (sin huecos ni solapes)"
+    return None
+
+
 def _peor_nivel(
     reading: Reading, umbrales: Sequence[Umbral]
-) -> tuple[tuple[str, Umbral] | None, Umbral | None]:
-    """(nivel más grave y su umbral, primer umbral mal formado) para la lectura."""
+) -> tuple[tuple[str, Umbral] | None, tuple[Umbral, str] | None]:
+    """(nivel más grave y su umbral, primer umbral inutilizable y su motivo)."""
     peor: tuple[str, Umbral] | None = None
-    mal_formado: Umbral | None = None
+    mal_formado: tuple[Umbral, str] | None = None
     if not _es_numero(reading.valor_crudo):
         return None, None
     for umbral in umbrales:
         if umbral.variable != reading.variable:
             continue
-        nivel = clasificar(reading.valor_crudo, umbral.niveles)
+        motivo = motivo_niveles(umbral.valor_min, umbral.valor_max, umbral.niveles)
+        nivel = clasificar(reading.valor_crudo, umbral.niveles) if motivo is None else None
         if nivel is None:
-            mal_formado = mal_formado or umbral
+            mal_formado = mal_formado or (umbral, motivo or "niveles inutilizables")
         elif peor is None or _GRAVEDAD[nivel] > _GRAVEDAD[peor[0]]:
             peor = (nivel, umbral)
     return peor, mal_formado
 
 
+def normales(
+    lecturas: Sequence[Reading], umbrales: Sequence[Umbral], eventos: Sequence[EventoEdge]
+) -> list[tuple[Reading, Umbral]]:
+    """Lecturas en banda `normal` de su umbral que no entraron en ningún evento.
+
+    Son las clasificaciones NORMAL: no se publican (un evento por muestra
+    saturaría el rate limit del backend), solo van al historial local.
+    """
+    en_eventos = {id(r) for evento in eventos for r in evento.lecturas}
+    resultado = []
+    for reading in lecturas:
+        if id(reading) in en_eventos:
+            continue
+        peor, _ = _peor_nivel(reading, umbrales)
+        if peor is not None and peor[0] == "normal":
+            resultado.append((reading, peor[1]))
+    return resultado
+
+
 # --- RF-55.2 -----------------------------------------------------------------
+
+
+def lecturas_invalidas(
+    lecturas: Sequence[Reading], variables: Mapping[str, str]
+) -> list[tuple[Reading, str]]:
+    """Lecturas que no se clasifican, con el motivo (TC-M03-081).
+
+    Valor nulo, no numérico, booleano, NaN o infinito, o fuera del rango
+    físico de su variable (`RANGOS_FISICOS`). No generan ningún evento, ni
+    siquiera ERROR_CONFIGURACION: el problema es el dato, no la regla.
+    """
+    nombres = {**VARIABLES_DEFECTO, **variables}
+    rangos = {nombres.get(c, c): rango for c, rango in RANGOS_FISICOS.items()}
+    invalidas = []
+    for reading in lecturas:
+        valor = reading.valor_crudo
+        if not _es_numero(valor):
+            invalidas.append((reading, f"valor no numérico o no finito: {valor!r}"))
+        elif reading.variable in rangos:
+            minimo, maximo = rangos[reading.variable]
+            if not minimo <= valor <= maximo:
+                invalidas.append(
+                    (reading, f"{valor!r} fuera del rango físico [{minimo:g}, {maximo:g}]")
+                )
+    return invalidas
 
 
 def validar_regla(cuerpo: Any) -> str | None:
@@ -203,20 +309,23 @@ def evaluar_lote(
     """
     eventos: list[EventoEdge] = []
     suprimidas: set[int] = set()  # id() de las lecturas cubiertas por una compuesta
+    # Un dato inválido no entra a la ventana ni a ninguna regla: así no puede
+    # producir una clasificación válida falsa (TC-M03-081).
+    invalidas = {id(r) for r, _ in lecturas_invalidas(lecturas, variables)}
+    lecturas = [r for r in lecturas if id(r) not in invalidas]
     if estado is not None:
-        for reading in lecturas:
-            estado.ventana.agregar(reading, ahora)
-        estado.confirmaciones.retener((r.id_regla_alerta, r.version_regla) for r in reglas)
-        nombres = {**VARIABLES_DEFECTO, **variables}
-        for regla in reglas:
-            for evento in _evaluar_regla(
-                regla, lecturas, umbrales, estado, nombres, ahora, version_firmware
-            ):
-                eventos.append(evento)
-                if evento.clasificacion == ev.DESVIACION_COMPUESTA and (
-                    regla.regla.get("prevalece_sobre_regla_simple") is True
-                ):
-                    suprimidas.update(id(r) for r in evento.lecturas)
+        try:
+            eventos, suprimidas = _evaluar_rf55_2(
+                lecturas, umbrales, reglas, estado, variables, ahora, version_firmware
+            )
+        except Exception as exc:
+            # RF-55.2 falló en esta captura: se descarta todo lo suyo y la
+            # captura entera se clasifica con RF-55.1 (TC-M03-097). El agente
+            # cuenta las fallas seguidas y lo deshabilita (TC-M03-088).
+            estado.fallo = exc
+            eventos, suprimidas = [], set()
+        else:
+            estado.fallo = None
     for reading in lecturas:
         if id(reading) in suprimidas:
             continue
@@ -224,6 +333,60 @@ def evaluar_lote(
         if evento is not None:
             eventos.append(evento)
     return eventos
+
+
+def _evaluar_rf55_2(
+    lecturas: Sequence[Reading],
+    umbrales: Sequence[Umbral],
+    reglas: Sequence[Regla],
+    estado: EstadoCompuestas,
+    variables: Mapping[str, str],
+    ahora: datetime,
+    version_firmware: str,
+) -> tuple[list[EventoEdge], set[int]]:
+    """Eventos de las reglas compuestas e id() de las lecturas que suprimen."""
+    eventos: list[EventoEdge] = []
+    suprimidas: set[int] = set()
+    for reading in lecturas:
+        estado.ventana.agregar(reading, ahora)
+    estado.confirmaciones.retener((r.id_regla_alerta, r.version_regla) for r in reglas)
+    nombres = {**VARIABLES_DEFECTO, **variables}
+    for regla in reglas:
+        for evento in _evaluar_regla(
+            regla, lecturas, umbrales, estado, nombres, ahora, version_firmware
+        ):
+            if evento.clasificacion == ev.DESVIACION_COMPUESTA and (
+                regla.regla.get("prevalece_sobre_regla_simple") is True
+            ):
+                evento = _con_maxima_severidad(evento, umbrales)
+                suprimidas.update(id(r) for r in evento.lecturas)
+            eventos.append(evento)
+    return eventos, suprimidas
+
+
+def _con_maxima_severidad(evento: EventoEdge, umbrales: Sequence[Umbral]) -> EventoEdge:
+    """La compuesta que prevalece con la máxima severidad entre RF-55.2 y RF-55.1 (TC-M03-089).
+
+    Suprimir el DESVIACION_SIMPLE no puede bajar la gravedad: si el umbral
+    simple de alguna de sus lecturas es más grave que la regla, el evento
+    toma esa severidad. Empate: decide RF-55.2. La metadata deja ambas para
+    reconstruir cómo se obtuvo la clasificación.
+    """
+    simples = [s for r in evento.lecturas if (s := severidad_simple(r, umbrales)) is not None]
+    simple = max(simples, key=SEVERIDADES.index, default=None)
+    gana_simple = simple is not None and (
+        SEVERIDADES.index(simple) > SEVERIDADES.index(evento.severidad)
+    )
+    return replace(
+        evento,
+        severidad=simple if gana_simple else evento.severidad,
+        metadata={
+            **evento.metadata,
+            "severidad_regla": evento.severidad,
+            "severidad_rf55_1": simple,
+            "severidad_origen": ORIGEN_RF55_1 if gana_simple else ORIGEN_RF55_2,
+        },
+    )
 
 
 def _evaluar_regla(
@@ -243,19 +406,14 @@ def _evaluar_regla(
     }
     try:
         plan = _interpretar(regla.regla)
-        if isinstance(plan, _TipoB):
-            return _evaluar_tipo_b(
-                plan, lecturas, umbrales, estado, nombres, ahora, version_firmware, metadata
-            )
-        return _evaluar_tipo_a(
-            plan, regla, lecturas, estado, nombres, ahora, version_firmware, metadata
-        )
-    except Exception as exc:
-        # `regla` es un dict libre que el broker no interpreta: lo que sea que
-        # traiga termina en ERROR_CONFIGURACION, nunca en una excepción.
+    except ReglaInvalida as exc:
+        # `regla` es un dict libre que el broker no interpreta: una que no se
+        # puede usar es ERROR_CONFIGURACION. Una excepción al *evaluar* una
+        # regla válida no lo es: es una falla de RF-55.2 y la maneja
+        # `evaluar_lote` (TC-M03-088/097).
         if not lecturas:
             return []
-        motivo = str(exc) if isinstance(exc, ReglaInvalida) else f"error evaluando: {exc!r}"
+        motivo = str(exc)
         return [
             ev.nuevo_evento(
                 ev.ERROR_CONFIGURACION,
@@ -268,6 +426,13 @@ def _evaluar_regla(
                 metadata={"regla_aplicada": None, **metadata, "motivo": motivo},
             )
         ]
+    if isinstance(plan, _TipoB):
+        return _evaluar_tipo_b(
+            plan, lecturas, umbrales, estado, nombres, ahora, version_firmware, metadata
+        )
+    return _evaluar_tipo_a(
+        plan, regla, lecturas, estado, nombres, ahora, version_firmware, metadata
+    )
 
 
 def _evaluar_tipo_b(
@@ -285,8 +450,15 @@ def _evaluar_tipo_b(
     opcionales = {nombres.get(c, c): c for c in formula.opcionales}
     eventos = []
     evaluados: set[str] = set()  # una evaluación por nodo y captura
+    # id() de las lecturas que ya entraron en un evento de esta regla: si dos
+    # nodos aportan las variables en la misma captura, sale un solo evento.
+    usadas_en_eventos: set[int] = set()
     for disparo in lecturas:
-        if disparo.variable not in requeridas or disparo.serial in evaluados:
+        if (
+            disparo.variable not in requeridas
+            or disparo.serial in evaluados
+            or id(disparo) in usadas_en_eventos
+        ):
             continue
         inicio = time.perf_counter()
         usadas = _correlacionar(disparo, requeridas, plan.ventana_s, estado)
@@ -299,6 +471,7 @@ def _evaluar_tipo_b(
         )
         if severidad is None:
             continue
+        usadas_en_eventos.update(id(r) for r in usadas.values())
         # La que disparó va primera: el broker toma de ella el `sensor_id` raíz.
         involucradas = [disparo]
         involucradas += [usadas[c] for c in formula.variables if usadas[c] is not disparo]
@@ -399,6 +572,10 @@ def _evaluar_tipo_a(
 def _interpretar(cuerpo: Any) -> _TipoA | _TipoB:
     if not isinstance(cuerpo, dict) or not cuerpo:
         raise ReglaInvalida("regla debe ser un objeto no vacío")
+    nombre = cuerpo.get("nombre")
+    if not isinstance(nombre, str) or not nombre.strip():
+        # Va en `nombre_regla` de cada evento: sin él no hay trazabilidad (TC-M03-199).
+        raise ReglaInvalida("nombre debe ser un texto no vacío")
     try:
         formula = buscar_formula(cuerpo.get("nombre"))
         if formula is not None:
@@ -411,10 +588,11 @@ def _interpretar(cuerpo: Any) -> _TipoA | _TipoB:
 
 
 def _interpretar_tipo_b(cuerpo: dict[str, Any], formula: Formula) -> _TipoB:
-    if len(formula.variables) > MAX_VARIABLES_POR_REGLA:
+    cantidad = len(formula.variables)
+    if not MIN_VARIABLES_POR_REGLA <= cantidad <= MAX_VARIABLES_POR_REGLA:
         raise ReglaInvalida(
-            f"{formula.codigo} correlaciona {len(formula.variables)} variables "
-            f"(máximo {MAX_VARIABLES_POR_REGLA})"
+            f"{formula.codigo} correlaciona {cantidad} variable(s) "
+            f"(mínimo {MIN_VARIABLES_POR_REGLA}, máximo {MAX_VARIABLES_POR_REGLA})"
         )
     ventana = cuerpo.get("ventana_correlacion_s")
     ventana_s = VENTANA_MAX_S if ventana is None else numero(ventana, "ventana_correlacion_s")
@@ -473,6 +651,10 @@ def _opcional(cuerpo: dict[str, Any], campo: str) -> float | None:
 def _span_ms(lecturas: Sequence[Reading]) -> int:
     tiempos = [r.timestamp_captura for r in lecturas]
     return round((max(tiempos) - min(tiempos)).total_seconds() * 1000)
+
+
+def _igual(a: float, b: float) -> bool:
+    return math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-9)
 
 
 def _es_numero(valor: Any) -> bool:

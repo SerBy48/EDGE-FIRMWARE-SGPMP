@@ -9,6 +9,7 @@ del agente solo lee resultados y deja la config deseada, bajo un lock.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from collections import defaultdict
@@ -358,6 +359,16 @@ class LoraGateway:
                     "Nodo 0x%04x: code de variable %d sin mapear (EDGE_LORA_VARIABLES)",
                     node.node_id,
                     measurement.code,
+                )
+                continue
+            if not math.isfinite(measurement.value):
+                # El float de la trama puede ser NaN/Inf aunque el CRC o el MIC
+                # sean válidos: no es una medición y no es JSON válido.
+                logger.warning(
+                    "Nodo 0x%04x: %s = %r descartada (valor no finito)",
+                    node.node_id,
+                    variable.nombre,
+                    measurement.value,
                 )
                 continue
             self._readings[node.serial].append(

@@ -134,7 +134,8 @@ def test_reconexion_heartbeat_activo_vaciado_e_inactivo(tmp_path):
     assert first_hb["metricas_buffer"]["ultimo_timestamp_pendiente"] is not None
 
     tel = h.link.on("telemetry")
-    assert len(tel) == pendientes
+    # Sin umbral, la variable dio además un ERROR_CONFIGURACION (TC-M03-083).
+    assert len(tel) + len(h.link.on("evento")) == pendientes
     assert tel[0]["origen"] == "BUFFER_LOCAL"
 
     h.link.take()
@@ -256,8 +257,9 @@ def con_umbral(h: Harness, niveles=NIVELES_ESTRICTOS) -> None:
             version=None,
             variable="temperatura_ambiente",
             unidad="C",
-            valor_min=0.0,
-            valor_max=18.0,
+            # Las bandas cubren [valor_min, valor_max] (forma de RF-17).
+            valor_min=min(n["limite_inferior"] for n in niveles),
+            valor_max=max(n["limite_superior"] for n in niveles),
             niveles=tuple(niveles),
         )
     )
@@ -277,11 +279,20 @@ def test_evento_sale_de_inmediato_por_el_topic_evento(harness):
     assert "timestamp_envio" not in evento  # sin campos extra de primer nivel
 
 
-def test_sin_umbral_no_hay_eventos(harness):
+def test_sin_umbral_un_error_de_configuracion_por_variable(harness):
+    """TC-M03-083: sin umbral no se clasifica; el error sale una vez y las lecturas siguen."""
     harness.advance(0)
     harness.advance(15 * 60)
-    assert harness.link.on("evento") == []
-    assert harness.link.on("telemetry")
+    harness.advance(15 * 60)
+    # Sin PUBACK el mismo evento se reenvía: se cuentan los distintos.
+    eventos = {e["metadata_edge"]["id_evento"]: e for e in harness.link.on("evento")}
+    (evento,) = eventos.values()
+    assert evento["clasificacion_rf55"] == "ERROR_CONFIGURACION"
+    assert "severidad" not in evento
+    meta = evento["metadata_edge"]
+    assert (meta["variable"], meta["severidad_invalida"]) == ("temperatura_ambiente", True)
+    assert meta["motivo"] == "sin umbral RF-17 para la variable en este Edge"
+    assert harness.link.on("telemetry")  # la lectura cruda sigue saliendo
 
 
 def test_evento_offline_se_persiste_y_sale_al_reconectar_sin_duplicados(tmp_path):

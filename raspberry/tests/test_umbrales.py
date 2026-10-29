@@ -32,6 +32,9 @@ def umbral(**overrides) -> dict:
         ],
     }
     data.update(overrides)
+    if "valor_max" in overrides and "niveles" not in overrides:
+        # Las bandas cubren [valor_min, valor_max]: el crítico llega al nuevo máximo.
+        data["niveles"][-1] = {**data["niveles"][-1], "limite_superior": data["valor_max"]}
     return data
 
 
