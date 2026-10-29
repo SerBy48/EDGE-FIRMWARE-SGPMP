@@ -20,7 +20,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from collections.abc import Collection
+from collections.abc import Collection, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,27 @@ CREATE INDEX IF NOT EXISTS ix_outbox_serial_due ON outbox (serial, due_at);
 """
 
 
+@contextmanager
+def transaccion(db: sqlite3.Connection) -> Iterator[None]:
+    """Un commit (un fsync) para todo el bloque en vez de uno por fila.
+
+    Una ráfaga son miles de filas por ciclo (TC-M03-102): con autocommit y
+    `synchronous=FULL` cada una espera al disco y el ciclo se bloquea segundos.
+    Si el proceso cae a mitad, el bloque no queda a medias. Dentro de otra
+    transacción no abre una nueva.
+    """
+    if db.in_transaction:
+        yield
+        return
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        db.execute("ROLLBACK")
+        raise
+    db.execute("COMMIT")
+
+
 @dataclass(frozen=True)
 class OutboxRow:
     id: int
@@ -67,12 +89,17 @@ class Buffer:
         self._db = sqlite3.connect(path, isolation_level=None)
         self._db.execute("PRAGMA journal_mode=WAL")
         # FULL: en campo los cortes de luz son esperables y un ACK perdido
-        # deja la config aplicada pero "no confirmada". El volumen es bajo.
+        # deja la config aplicada pero "no confirmada". Cada commit espera al
+        # disco: las escrituras de una captura van juntas en `lote()`.
         self._db.execute("PRAGMA synchronous=FULL")
         self._db.executescript(_SCHEMA)
 
     def close(self) -> None:
         self._db.close()
+
+    def lote(self) -> AbstractContextManager[None]:
+        """Las escrituras del bloque, en una sola transacción (ver `transaccion`)."""
+        return transaccion(self._db)
 
     def enqueue(
         self,

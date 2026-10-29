@@ -44,8 +44,12 @@ cuando el repo sea privado. Los tags los crea el CI a partir de los commits
   `sgpmp/<serial>/status` con el `id_comando` del broker; idempotente por
   `id_comando`/`config_version` y, con NTP, rechaza comandos vencidos por
   `emitido_en` (TC-M09-252).
-- Telemetría y ACKs pasan por un buffer SQLite: nada se pierde sin red ni
-  al reiniciar, y lo retenido sale con `origen: BUFFER_LOCAL`.
+- Telemetría, eventos RF-55 y ACKs pasan por un buffer SQLite: nada se pierde
+  sin red ni al reiniciar, y lo retenido sale con `origen: BUFFER_LOCAL`.
+- Historial local de clasificaciones RF-55 (`historial.db`, NORMAL incluidas)
+  con la ruta y el estado de envío de cada evento. Inspección de solo lectura:
+  `python -m edge_agent.inspeccionar buffer|historial` (ver
+  `docs/CONTRATO_EVENTO_EDGE.md` §7).
 
 ## Correr en desarrollo
 
@@ -54,6 +58,10 @@ python -m venv .venv
 .venv/Scripts/pip install -e ".[dev]"      # Linux: .venv/bin/pip
 .venv/Scripts/python -m pytest
 .venv/Scripts/ruff check .
+
+# QA de RF-55 sin hardware (docs/CONTRATO_EVENTO_EDGE.md §6.2 y §7)
+.venv/Scripts/python scripts/inyectar_lecturas.py scripts/casos_rf55.json
+.venv/Scripts/python scripts/medir_rendimiento.py todo    # latencia y ráfaga
 
 # Aceptación contra dev (además de EDGE_*: EDGE_IT_API_URL, EDGE_IT_API_TOKEN)
 .venv/Scripts/python -m pytest -m integration -v
@@ -72,6 +80,8 @@ edge_agent/
   commands.py         # validación RF-23/RF-17 e idempotencia, armado del ACK
   config_store.py     # config vigente por serial y umbrales RF-17 (JSON atómico)
   buffer.py           # outbox SQLite (WAL) + estado_local_buffer
+  historial.py        # log local de clasificaciones RF-55 (historial.db)
+  inspeccionar.py     # CLI de solo lectura: buffer e historial
   sources.py          # DataSource + FakeLoraSource
   system.py           # reloj_sincronizado (timedatectl)
   systemd.py          # sd_notify: READY y watchdog
@@ -89,6 +99,8 @@ systemd/
 scripts/
   install.sh          # provisión/actualización idempotente
   update.sh           # busca, verifica e instala el último release (rollback)
+  inyectar_lecturas.py  # QA de RF-55: casos de casos_rf55.json contra el agente real
+  medir_rendimiento.py  # QA de RF-55: latencia (TC-M03-082) y ráfaga (TC-M03-102)
 release/
   allowed_signers     # claves que pueden firmar releases (firma opcional)
 tests/

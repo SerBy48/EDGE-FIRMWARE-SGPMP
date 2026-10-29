@@ -76,9 +76,10 @@
       "esperado": []
     },
     {
-      "nombre": "S8 variable sin umbral",
+      "nombre": "S8 TC-M03-083 variable sin umbral",
       "lecturas": [{"t": 0, "variable": "humedad_suelo", "valor": 99.0, "unidad": "%"}],
-      "esperado": []
+      "esperado": [],
+      "esperado_sin_umbral": ["humedad_suelo"]
     },
     {
       "nombre": "C1 vector THI (32.5 C, 78 %)",
@@ -86,7 +87,7 @@
         {"t": 0, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C", "sensor": "dht22_ambiente"},
         {"t": 0, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%", "sensor": "dht22_ambiente"}
       ],
-      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "regla_aplicada": "ESTRES_TERMICO", "primera_variable": "temperatura_ambiente", "valores_derivados": {"THI": 81.3}}]
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "CRITICO", "regla_aplicada": "ESTRES_TERMICO", "primera_variable": "temperatura_ambiente", "valores_derivados": {"THI": 86.57}}]
     },
     {
       "nombre": "C2 corte THI 72 (LEVE)",
@@ -98,13 +99,13 @@
       "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "LEVE", "valores_derivados": {"THI": 72.0}}]
     },
     {
-      "nombre": "C3 corte THI 79 (MODERADO)",
+      "nombre": "C3 corte THI 78 (MODERADO)",
       "umbrales": [],
       "lecturas": [
-        {"t": 0, "variable": "temperatura_ambiente", "valor": 79.0, "unidad": "F"},
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 78.0, "unidad": "F"},
         {"t": 0, "variable": "humedad_relativa", "valor": 100.0, "unidad": "%"}
       ],
-      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "valores_derivados": {"THI": 79.0}}]
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "valores_derivados": {"THI": 78.0}}]
     },
     {
       "nombre": "C4 corte THI 84 (CRITICO)",
@@ -127,20 +128,34 @@
     },
     {
       "nombre": "C6 escalada por frecuencia respiratoria en precaucion",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 8,
+          "version": null,
+          "variable": "frecuencia_respiratoria",
+          "unidad": "rpm",
+          "valor_min": 10.0,
+          "valor_max": 80.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 10.0, "limite_superior": 40.0},
+            {"nivel": "precaucion", "limite_inferior": 40.0, "limite_superior": 60.0},
+            {"nivel": "critico", "limite_inferior": 60.0, "limite_superior": 80.0}
+          ]
+        }
+      ],
       "lecturas": [
         {"t": 0, "variable": "temperatura_ambiente", "valor": 72.0, "unidad": "F"},
         {"t": 0, "variable": "humedad_relativa", "valor": 100.0, "unidad": "%"},
         {"t": 0, "variable": "frecuencia_respiratoria", "valor": 50.0, "unidad": "rpm", "serial": "COLLAR-QA-01"}
       ],
-      "esperado": [
-        {"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "valores_derivados": {"THI": 72.0}}
-      ]
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "valores_derivados": {"THI": 72.0}}]
     },
     {
       "nombre": "C7 variable faltante",
       "umbrales": [],
       "lecturas": [{"t": 0, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"}],
-      "esperado": []
+      "esperado": [],
+      "esperado_sin_umbral": ["temperatura_ambiente"]
     },
     {
       "nombre": "C8 lectura fuera de la ventana de 30 s",
@@ -149,7 +164,8 @@
         {"t": 0, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
         {"t": 31, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"}
       ],
-      "esperado": []
+      "esperado": [],
+      "esperado_sin_umbral": ["humedad_relativa", "temperatura_ambiente"]
     },
     {
       "nombre": "C9 lectura dentro de la ventana (29 s)",
@@ -158,7 +174,8 @@
         {"t": 0, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
         {"t": 29, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"}
       ],
-      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "primera_variable": "humedad_relativa"}]
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "CRITICO", "primera_variable": "humedad_relativa"}],
+      "esperado_sin_umbral": ["temperatura_ambiente"]
     },
     {
       "nombre": "C10 prevalencia: la compuesta suprime el simple",
@@ -167,6 +184,15 @@
         {"t": 0, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"}
       ],
       "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA"}]
+    },
+    {
+      "nombre": "C11 ejemplo QA TC-M03-084 (25 C, 60 %)",
+      "umbrales": [],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 25.0, "unidad": "C"},
+        {"t": 0, "variable": "humedad_relativa", "valor": 60.0, "unidad": "%"}
+      ],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "LEVE", "regla_aplicada": "ESTRES_TERMICO", "valores_derivados": {"THI": 72.82}}]
     },
     {
       "nombre": "A1 Tipo A confirma a la 3.a repeticion",
@@ -191,7 +217,8 @@
         {"t": 60, "variable": "temperatura_ambiente", "valor": 31.5, "unidad": "C"},
         {"t": 120, "variable": "temperatura_ambiente", "valor": 32.0, "unidad": "C"}
       ],
-      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "regla_aplicada": "VENTANA_CONFIRMACION"}]
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "regla_aplicada": "VENTANA_CONFIRMACION"}],
+      "esperado_sin_umbral": ["temperatura_ambiente"]
     },
     {
       "nombre": "A2 Tipo A repeticiones fuera de la ventana",
@@ -216,7 +243,757 @@
         {"t": 360, "variable": "temperatura_ambiente", "valor": 31.0, "unidad": "C"},
         {"t": 540, "variable": "temperatura_ambiente", "valor": 31.0, "unidad": "C"}
       ],
-      "esperado": []
+      "esperado": [],
+      "esperado_sin_umbral": ["temperatura_ambiente"]
+    },
+    {
+      "nombre": "H1 HIDRICA_106 pH 5.8 y OD 3.9 (ambas)",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 21,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad hidrica",
+            "tipo_sensor": "PH",
+            "categoria_variable": "AGUA",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "ph", "valor": 5.8, "unidad": "pH"},
+        {"t": 1, "variable": "oxigeno_disuelto", "valor": 3.9, "unidad": "mg/L"}
+      ],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "CRITICO", "regla_aplicada": "CALIDAD_HIDRICA", "primera_variable": "oxigeno_disuelto"}],
+      "esperado_sin_umbral": ["ph"]
+    },
+    {
+      "nombre": "H2 HIDRICA_106 solo pH fuera (5.8, OD 6.5)",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 21,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad hidrica",
+            "tipo_sensor": "PH",
+            "categoria_variable": "AGUA",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "ph", "valor": 5.8, "unidad": "pH"},
+        {"t": 1, "variable": "oxigeno_disuelto", "valor": 6.5, "unidad": "mg/L"}
+      ],
+      "esperado": [],
+      "esperado_sin_umbral": ["oxigeno_disuelto", "ph"]
+    },
+    {
+      "nombre": "H3 HIDRICA_106 solo OD bajo (pH 7.2, OD 3.9)",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 21,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad hidrica",
+            "tipo_sensor": "PH",
+            "categoria_variable": "AGUA",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "ph", "valor": 7.2, "unidad": "pH"},
+        {"t": 1, "variable": "oxigeno_disuelto", "valor": 3.9, "unidad": "mg/L"}
+      ],
+      "esperado": [],
+      "esperado_sin_umbral": ["oxigeno_disuelto", "ph"]
+    },
+    {
+      "nombre": "H4 borde pH 8.5 permitido (OD 3.0)",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 21,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad hidrica",
+            "tipo_sensor": "PH",
+            "categoria_variable": "AGUA",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "ph", "valor": 8.5, "unidad": "pH"},
+        {"t": 1, "variable": "oxigeno_disuelto", "valor": 3.0, "unidad": "mg/L"}
+      ],
+      "esperado": [],
+      "esperado_sin_umbral": ["oxigeno_disuelto", "ph"]
+    },
+    {
+      "nombre": "H5 borde OD 5.0 no es bajo (pH 9.0)",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 21,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad hidrica",
+            "tipo_sensor": "PH",
+            "categoria_variable": "AGUA",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "ph", "valor": 9.0, "unidad": "pH"},
+        {"t": 1, "variable": "oxigeno_disuelto", "valor": 5.0, "unidad": "mg/L"}
+      ],
+      "esperado": [],
+      "esperado_sin_umbral": ["oxigeno_disuelto", "ph"]
+    },
+    {
+      "nombre": "G1 TC-M03-085 NH3 30 y CO2 2200 (ambos superan)",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 31,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad del aire",
+            "tipo_sensor": "GAS",
+            "categoria_variable": "AMBIENTAL",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "nh3", "valor": 30.0, "unidad": "ppm"},
+        {"t": 1, "variable": "co2", "valor": 2200.0, "unidad": "ppm"}
+      ],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "regla_aplicada": "CALIDAD_AIRE", "primera_variable": "co2"}],
+      "esperado_sin_umbral": ["nh3"]
+    },
+    {
+      "nombre": "G2 TC-M03-105 solo CO2 por debajo (NH3 30, CO2 1800)",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 31,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad del aire",
+            "tipo_sensor": "GAS",
+            "categoria_variable": "AMBIENTAL",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "nh3", "valor": 30.0, "unidad": "ppm"},
+        {"t": 1, "variable": "co2", "valor": 1800.0, "unidad": "ppm"}
+      ],
+      "esperado": [],
+      "esperado_sin_umbral": ["co2", "nh3"]
+    },
+    {
+      "nombre": "G3 TC-M03-105 solo NH3 por debajo (NH3 20, CO2 2200)",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 31,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad del aire",
+            "tipo_sensor": "GAS",
+            "categoria_variable": "AMBIENTAL",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "nh3", "valor": 20.0, "unidad": "ppm"},
+        {"t": 1, "variable": "co2", "valor": 2200.0, "unidad": "ppm"}
+      ],
+      "esperado": [],
+      "esperado_sin_umbral": ["co2", "nh3"]
+    },
+    {
+      "nombre": "G4 borde NH3 25 no supera (CO2 2200)",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 31,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad del aire",
+            "tipo_sensor": "GAS",
+            "categoria_variable": "AMBIENTAL",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "nh3", "valor": 25.0, "unidad": "ppm"},
+        {"t": 1, "variable": "co2", "valor": 2200.0, "unidad": "ppm"}
+      ],
+      "esperado": [],
+      "esperado_sin_umbral": ["co2", "nh3"]
+    },
+    {
+      "nombre": "G5 ventana: CO2 29 s despues correlaciona",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 31,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad del aire",
+            "tipo_sensor": "GAS",
+            "categoria_variable": "AMBIENTAL",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "nh3", "valor": 30.0, "unidad": "ppm"},
+        {"t": 29, "variable": "co2", "valor": 2200.0, "unidad": "ppm"}
+      ],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "regla_aplicada": "CALIDAD_AIRE"}],
+      "esperado_sin_umbral": ["nh3"]
+    },
+    {
+      "nombre": "G6 ventana: CO2 31 s despues no correlaciona",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 31,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Calidad del aire",
+            "tipo_sensor": "GAS",
+            "categoria_variable": "AMBIENTAL",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "nh3", "valor": 30.0, "unidad": "ppm"},
+        {"t": 31, "variable": "co2", "valor": 2200.0, "unidad": "ppm"}
+      ],
+      "esperado": [],
+      "esperado_sin_umbral": ["co2", "nh3"]
+    },
+    {
+      "nombre": "F1 TC-M03-097 falla transitoria: RF-55.1 un ciclo y sigue activo",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": null,
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 18.0,
+          "valor_max": 32.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 18.0, "limite_superior": 24.0},
+            {"nivel": "precaucion", "limite_inferior": 24.0, "limite_superior": 28.0},
+            {"nivel": "critico", "limite_inferior": 28.0, "limite_superior": 32.0}
+          ]
+        }
+      ],
+      "reglas": [
+        {
+          "id_regla_alerta": 12,
+          "version_regla": 3,
+          "regla": {"nombre": "Estres termico por THI", "prevalece_sobre_regla_simple": true}
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 0, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"},
+        {"t": 60, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 60, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"},
+        {"t": 60, "fallo_rf55_2": true},
+        {"t": 120, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 120, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"}
+      ],
+      "esperado": [
+        {"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "CRITICO", "regla_aplicada": "ESTRES_TERMICO"},
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"},
+        {"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "CRITICO", "regla_aplicada": "ESTRES_TERMICO"}
+      ],
+      "esperado_rf55_2": [
+        {"t": 0, "estado": "ACTIVO", "fallos_consecutivos": 0, "operativo": true},
+        {"t": 60, "estado": "ACTIVO", "fallos_consecutivos": 1, "operativo": true},
+        {"t": 120, "estado": "ACTIVO", "fallos_consecutivos": 0, "operativo": true}
+      ],
+      "esperado_sin_umbral": ["humedad_relativa"]
+    },
+    {
+      "nombre": "F2 TC-M03-088 tres fallas seguidas deshabilitan RF-55.2; RF-55.1 sigue",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": null,
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 18.0,
+          "valor_max": 32.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 18.0, "limite_superior": 24.0},
+            {"nivel": "precaucion", "limite_inferior": 24.0, "limite_superior": 28.0},
+            {"nivel": "critico", "limite_inferior": 28.0, "limite_superior": 32.0}
+          ]
+        }
+      ],
+      "reglas": [
+        {
+          "id_regla_alerta": 12,
+          "version_regla": 3,
+          "regla": {"nombre": "Estres termico por THI", "prevalece_sobre_regla_simple": true}
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 0, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"},
+        {"t": 0, "fallo_rf55_2": true},
+        {"t": 60, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 60, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"},
+        {"t": 60, "fallo_rf55_2": true},
+        {"t": 120, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 120, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"},
+        {"t": 120, "fallo_rf55_2": true},
+        {"t": 180, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 180, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"}
+      ],
+      "esperado": [
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"},
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"},
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"},
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"}
+      ],
+      "esperado_rf55_2": [
+        {"t": 60, "estado": "ACTIVO", "fallos_consecutivos": 2},
+        {"t": 120, "estado": "DESHABILITADO", "fallos_consecutivos": 3, "operativo": false},
+        {"t": 180, "estado": "DESHABILITADO", "operativo": false}
+      ],
+      "esperado_sin_umbral": ["humedad_relativa"]
+    },
+    {
+      "nombre": "F3 TC-M03-097 reactivacion automatica a los 10 min",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": null,
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 18.0,
+          "valor_max": 32.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 18.0, "limite_superior": 24.0},
+            {"nivel": "precaucion", "limite_inferior": 24.0, "limite_superior": 28.0},
+            {"nivel": "critico", "limite_inferior": 28.0, "limite_superior": 32.0}
+          ]
+        }
+      ],
+      "reglas": [
+        {
+          "id_regla_alerta": 12,
+          "version_regla": 3,
+          "regla": {"nombre": "Estres termico por THI", "prevalece_sobre_regla_simple": true}
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 0, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"},
+        {"t": 0, "fallo_rf55_2": true},
+        {"t": 60, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 60, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"},
+        {"t": 60, "fallo_rf55_2": true},
+        {"t": 120, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 120, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"},
+        {"t": 120, "fallo_rf55_2": true},
+        {"t": 700, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 700, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"},
+        {"t": 730, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 730, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"},
+        {"t": 730, "fallo_rf55_2": true},
+        {"t": 1400, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 1400, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"}
+      ],
+      "esperado": [
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"},
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"},
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"},
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"},
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"},
+        {"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "CRITICO", "regla_aplicada": "ESTRES_TERMICO"}
+      ],
+      "esperado_rf55_2": [
+        {"t": 120, "estado": "DESHABILITADO", "fallos_consecutivos": 3},
+        {"t": 700, "estado": "DESHABILITADO", "fallos_consecutivos": 3},
+        {"t": 730, "estado": "DESHABILITADO", "fallos_consecutivos": 4},
+        {"t": 1400, "estado": "ACTIVO", "fallos_consecutivos": 0, "operativo": true}
+      ],
+      "esperado_sin_umbral": ["humedad_relativa"]
+    },
+    {
+      "nombre": "B1 TC-M03-098 buffer RF-54 sin conectividad",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": "2026-10-05T17:59:58+00:00",
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 18.0,
+          "valor_max": 32.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 18.0, "limite_superior": 24.0},
+            {"nivel": "precaucion", "limite_inferior": 24.0, "limite_superior": 28.0},
+            {"nivel": "critico", "limite_inferior": 28.0, "limite_superior": 32.0}
+          ]
+        }
+      ],
+      "reglas": [],
+      "lecturas": [
+        {"t": 0, "conectividad": false},
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 21.0, "unidad": "C"},
+        {"t": 10, "variable": "temperatura_ambiente", "valor": 26.0, "unidad": "C"},
+        {"t": 20, "variable": "temperatura_ambiente", "valor": 30.0, "unidad": "C"},
+        {"t": 20, "inspeccionar_buffer": true},
+        {"t": 120, "conectividad": true},
+        {"t": 120, "inspeccionar_buffer": true}
+      ],
+      "esperado": [
+        {
+          "clasificacion_rf55": "DESVIACION_SIMPLE",
+          "severidad": "MODERADO",
+          "origen": "BUFFER_LOCAL",
+          "estado_conectividad": false
+        },
+        {
+          "clasificacion_rf55": "DESVIACION_SIMPLE",
+          "severidad": "CRITICO",
+          "origen": "BUFFER_LOCAL",
+          "estado_conectividad": false
+        }
+      ],
+      "esperado_buffer": [
+        {"evento": 2, "telemetry": 3},
+        {"evento": 2, "telemetry": 3},
+        {"evento": 0, "telemetry": 0}
+      ],
+      "esperado_historial": [
+        {"clasificacion": "NORMAL", "ruta": "LOCAL", "estado": "LOCAL"},
+        {
+          "clasificacion": "DESVIACION_SIMPLE",
+          "severidad": "MODERADO",
+          "ruta": "BUFFER",
+          "estado": "ENVIADO",
+          "origen": "BUFFER_LOCAL"
+        },
+        {
+          "clasificacion": "DESVIACION_SIMPLE",
+          "severidad": "CRITICO",
+          "ruta": "BUFFER",
+          "estado": "ENVIADO",
+          "origen": "BUFFER_LOCAL"
+        }
+      ]
+    },
+    {
+      "nombre": "B2 TC-M03-099 enrutamiento directo a RF-56 con conectividad",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": "2026-10-05T17:59:58+00:00",
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 18.0,
+          "valor_max": 32.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 18.0, "limite_superior": 24.0},
+            {"nivel": "precaucion", "limite_inferior": 24.0, "limite_superior": 28.0},
+            {"nivel": "critico", "limite_inferior": 28.0, "limite_superior": 32.0}
+          ]
+        }
+      ],
+      "reglas": [],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 26.0, "unidad": "C"},
+        {"t": 0, "inspeccionar_buffer": true}
+      ],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "MODERADO", "origen": "TIEMPO_REAL", "estado_conectividad": true}],
+      "esperado_buffer": [{"evento": 0, "telemetry": 0}],
+      "esperado_historial": [
+        {"clasificacion": "DESVIACION_SIMPLE", "ruta": "DIRECTA", "estado": "ENVIADO", "origen": "TIEMPO_REAL"}
+      ]
+    },
+    {
+      "nombre": "B3 TC-M03-100 log local sin backend",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": "2026-10-05T17:59:58+00:00",
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 18.0,
+          "valor_max": 32.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 18.0, "limite_superior": 24.0},
+            {"nivel": "precaucion", "limite_inferior": 24.0, "limite_superior": 28.0},
+            {"nivel": "critico", "limite_inferior": 28.0, "limite_superior": 32.0}
+          ]
+        }
+      ],
+      "reglas": [],
+      "lecturas": [
+        {"t": 0, "conectividad": false},
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 21.0, "unidad": "C"},
+        {"t": 10, "variable": "temperatura_ambiente", "valor": 30.0, "unidad": "C"},
+        {"t": 20, "variable": "temperatura_ambiente", "valor": 22.0, "unidad": "C"}
+      ],
+      "esperado": [],
+      "esperado_historial": [
+        {"clasificacion": "NORMAL", "ruta": "LOCAL", "estado": "LOCAL"},
+        {"clasificacion": "DESVIACION_SIMPLE", "severidad": "CRITICO", "ruta": "BUFFER", "estado": "PENDIENTE"},
+        {"clasificacion": "NORMAL", "ruta": "LOCAL", "estado": "LOCAL"}
+      ]
+    },
+    {
+      "nombre": "P1 TC-M03-081 humedad nula con THI",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 12,
+          "version_regla": 3,
+          "regla": {"nombre": "Estres termico por THI", "prevalece_sobre_regla_simple": true}
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 0, "variable": "humedad_relativa", "valor": null, "unidad": "%"}
+      ],
+      "esperado": [],
+      "esperado_historial": [
+        {"clasificacion": "LECTURA_INVALIDA", "ruta": "LOCAL", "estado": "LOCAL"},
+        {"clasificacion": "ERROR_CONFIGURACION", "ruta": "DIRECTA", "estado": "ENVIADO"}
+      ],
+      "esperado_sin_umbral": ["temperatura_ambiente"]
+    },
+    {
+      "nombre": "P2 TC-M03-081 pH no numerico y OD booleano",
+      "umbrales": [],
+      "reglas": [
+        {"id_regla_alerta": 21, "version_regla": 1, "regla": {"nombre": "Calidad hidrica"}}
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "ph", "valor": "abc", "unidad": "pH"},
+        {"t": 0, "variable": "oxigeno_disuelto", "valor": true, "unidad": "mg/L"}
+      ],
+      "esperado": [],
+      "esperado_historial": [
+        {"clasificacion": "LECTURA_INVALIDA", "ruta": "LOCAL", "estado": "LOCAL"},
+        {"clasificacion": "LECTURA_INVALIDA", "ruta": "LOCAL", "estado": "LOCAL"}
+      ]
+    },
+    {
+      "nombre": "P3 TC-M03-081 fuera de rango fisico (HR 150 %, pH 20)",
+      "umbrales": [],
+      "reglas": [
+        {
+          "id_regla_alerta": 12,
+          "version_regla": 3,
+          "regla": {"nombre": "Estres termico por THI", "prevalece_sobre_regla_simple": true}
+        },
+        {"id_regla_alerta": 21, "version_regla": 1, "regla": {"nombre": "Calidad hidrica"}}
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 30.0, "unidad": "C"},
+        {"t": 0, "variable": "humedad_relativa", "valor": 150.0, "unidad": "%"},
+        {"t": 0, "variable": "ph", "valor": 20.0, "unidad": "pH"},
+        {"t": 0, "variable": "oxigeno_disuelto", "valor": 3.9, "unidad": "mg/L"}
+      ],
+      "esperado": [],
+      "esperado_historial": [
+        {"clasificacion": "LECTURA_INVALIDA", "ruta": "LOCAL", "estado": "LOCAL"},
+        {"clasificacion": "LECTURA_INVALIDA", "ruta": "LOCAL", "estado": "LOCAL"},
+        {"clasificacion": "ERROR_CONFIGURACION", "ruta": "DIRECTA", "estado": "ENVIADO"},
+        {"clasificacion": "ERROR_CONFIGURACION", "ruta": "DIRECTA", "estado": "ENVIADO"}
+      ],
+      "esperado_sin_umbral": ["oxigeno_disuelto", "temperatura_ambiente"]
+    },
+    {
+      "nombre": "P4 TC-M03-081 la lectura valida de la captura se sigue clasificando",
+      "reglas": [
+        {
+          "id_regla_alerta": 12,
+          "version_regla": 3,
+          "regla": {"nombre": "Estres termico por THI", "prevalece_sobre_regla_simple": true}
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 30.0, "unidad": "C"},
+        {"t": 0, "variable": "humedad_relativa", "valor": null, "unidad": "%"}
+      ],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO", "regla_aplicada": "UMBRAL_AMBIENTAL"}],
+      "esperado_historial": [
+        {"clasificacion": "LECTURA_INVALIDA", "ruta": "LOCAL", "estado": "LOCAL"},
+        {"clasificacion": "DESVIACION_SIMPLE", "severidad": "CRITICO", "estado": "ENVIADO"}
+      ]
+    },
+    {
+      "nombre": "E1 TC-M03-083 variable sin umbral: un ERROR_CONFIGURACION y siguen las mediciones",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 8,
+          "version": null,
+          "variable": "frecuencia_respiratoria",
+          "unidad": "rpm",
+          "valor_min": 10.0,
+          "valor_max": 80.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 10.0, "limite_superior": 40.0},
+            {"nivel": "precaucion", "limite_inferior": 40.0, "limite_superior": 60.0},
+            {"nivel": "critico", "limite_inferior": 60.0, "limite_superior": 80.0}
+          ]
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 30.0, "unidad": "C"},
+        {"t": 0, "variable": "frecuencia_respiratoria", "valor": 50.0, "unidad": "rpm"},
+        {"t": 60, "variable": "temperatura_ambiente", "valor": 30.0, "unidad": "C"},
+        {"t": 60, "variable": "frecuencia_respiratoria", "valor": 50.0, "unidad": "rpm"},
+        {"t": 120, "variable": "temperatura_ambiente", "valor": 30.0, "unidad": "C"},
+        {"t": 120, "variable": "frecuencia_respiratoria", "valor": 50.0, "unidad": "rpm"}
+      ],
+      "esperado": [
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "MODERADO", "primera_variable": "frecuencia_respiratoria"},
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "MODERADO", "primera_variable": "frecuencia_respiratoria"},
+        {"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "MODERADO", "primera_variable": "frecuencia_respiratoria"}
+      ],
+      "esperado_sin_umbral": ["temperatura_ambiente"],
+      "esperado_historial": [
+        {"clasificacion": "ERROR_CONFIGURACION", "ruta": "DIRECTA", "severidad": null},
+        {"clasificacion": "DESVIACION_SIMPLE", "ruta": "DIRECTA"},
+        {"clasificacion": "ERROR_CONFIGURACION", "ruta": "LOCAL", "estado": "LOCAL"},
+        {"clasificacion": "DESVIACION_SIMPLE", "ruta": "DIRECTA"},
+        {"clasificacion": "ERROR_CONFIGURACION", "ruta": "LOCAL", "estado": "LOCAL"},
+        {"clasificacion": "DESVIACION_SIMPLE", "ruta": "DIRECTA"}
+      ]
+    },
+    {
+      "nombre": "E2 TC-M03-095 umbral en cero se rechaza (ACK_UMBRAL ERROR)",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": "2026-10-05T17:59:58+00:00",
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 0.0,
+          "valor_max": 0.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 0.0, "limite_superior": 0.0},
+            {"nivel": "precaucion", "limite_inferior": 0.0, "limite_superior": 0.0},
+            {"nivel": "critico", "limite_inferior": 0.0, "limite_superior": 0.0}
+          ]
+        }
+      ],
+      "lecturas": [{"t": 0, "variable": "temperatura_ambiente", "valor": 25.0, "unidad": "C"}],
+      "acks_error": 1,
+      "esperado": [],
+      "esperado_sin_umbral": ["temperatura_ambiente"]
+    },
+    {
+      "nombre": "E3 TC-M03-095 banda de ancho cero se rechaza (ACK_UMBRAL ERROR)",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": "2026-10-05T17:59:58+00:00",
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 18.0,
+          "valor_max": 32.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 18.0, "limite_superior": 24.0},
+            {"nivel": "precaucion", "limite_inferior": 24.0, "limite_superior": 24.0},
+            {"nivel": "critico", "limite_inferior": 24.0, "limite_superior": 32.0}
+          ]
+        }
+      ],
+      "lecturas": [{"t": 0, "variable": "temperatura_ambiente", "valor": 26.0, "unidad": "C"}],
+      "acks_error": 1,
+      "esperado": [],
+      "esperado_sin_umbral": ["temperatura_ambiente"]
+    },
+    {
+      "nombre": "E4 TC-M03-095 un limite en 0 es valido y no divide por cero",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": "2026-10-05T17:59:58+00:00",
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 0.0,
+          "valor_max": 10.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 0.0, "limite_superior": 5.0},
+            {"nivel": "precaucion", "limite_inferior": 5.0, "limite_superior": 8.0},
+            {"nivel": "critico", "limite_inferior": 8.0, "limite_superior": 10.0}
+          ]
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 0.0, "unidad": "C"},
+        {"t": 60, "variable": "temperatura_ambiente", "valor": 9.0, "unidad": "C"}
+      ],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_SIMPLE", "severidad": "CRITICO"}]
+    },
+    {
+      "nombre": "E5 TC-M03-122 umbral sin bandas de severidad se rechaza (ACK_UMBRAL ERROR)",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": "2026-10-05T17:59:58+00:00",
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 18.0,
+          "valor_max": 32.0,
+          "niveles": [{"nivel": "normal", "limite_inferior": 18.0, "limite_superior": 32.0}]
+        }
+      ],
+      "lecturas": [{"t": 0, "variable": "temperatura_ambiente", "valor": 35.0, "unidad": "C"}],
+      "acks_error": 1,
+      "esperado": [],
+      "esperado_sin_umbral": ["temperatura_ambiente"]
+    },
+    {
+      "nombre": "E6 TC-M03-122 umbral guardado sin severidad: no inventa CRITICO",
+      "umbrales": [],
+      "umbrales_guardados": [
+        {
+          "id_umbral_ambiental": 7,
+          "version": "2026-10-05T17:59:58+00:00",
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 18.0,
+          "valor_max": 32.0,
+          "niveles": [{"nivel": "normal", "limite_inferior": 18.0, "limite_superior": 32.0}]
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 35.0, "unidad": "C"},
+        {"t": 60, "variable": "temperatura_ambiente", "valor": 36.0, "unidad": "C"}
+      ],
+      "esperado": [{"clasificacion_rf55": "ERROR_CONFIGURACION", "severidad": null, "severidad_invalida": true, "motivo": "niveles debe traer normal, precaucion y critico, una vez cada uno"}],
+      "esperado_historial": [
+        {"clasificacion": "ERROR_CONFIGURACION", "ruta": "DIRECTA", "estado": "ENVIADO"},
+        {"clasificacion": "ERROR_CONFIGURACION", "ruta": "LOCAL", "estado": "LOCAL"}
+      ]
     },
     {
       "nombre": "L1 sexta regla activa rechazada",
@@ -242,6 +1019,65 @@
       "lecturas": [],
       "esperado": [],
       "acks_error": 1
+    },
+    {
+      "nombre": "M1 TC-M03-089 Tipo A MODERADO y RF-55.1 CRITICO (32.5 C)",
+      "reglas": [
+        {
+          "id_regla_alerta": 50,
+          "version_regla": 1,
+          "regla": {
+            "nombre": "Temperatura alta",
+            "tipo_sensor": "TEMPERATURA",
+            "categoria_variable": "AMBIENTAL",
+            "umbral_max": "30",
+            "lectura_confirmacion_max": "1",
+            "ventana_confirmacion_min": "0",
+            "prevalece_sobre_regla_simple": true
+          }
+        }
+      ],
+      "lecturas": [{"t": 0, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"}],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "CRITICO", "regla_aplicada": "VENTANA_CONFIRMACION", "severidad_regla": "MODERADO", "severidad_rf55_1": "CRITICO", "severidad_origen": "RF-55.1"}]
+    },
+    {
+      "nombre": "M2 TC-M03-089 THI LEVE y RF-55.1 MODERADO (25 C, 60 %)",
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 25.0, "unidad": "C"},
+        {"t": 0, "variable": "humedad_relativa", "valor": 60.0, "unidad": "%"}
+      ],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO", "regla_aplicada": "ESTRES_TERMICO", "severidad_regla": "LEVE", "severidad_rf55_1": "MODERADO", "severidad_origen": "RF-55.1", "valores_derivados": {"THI": 72.82}}]
+    },
+    {
+      "nombre": "M3 TC-M03-089 THI CRITICO y RF-55.1 MODERADO (decide RF-55.2)",
+      "umbrales": [
+        {
+          "id_umbral_ambiental": 9,
+          "version": null,
+          "variable": "temperatura_ambiente",
+          "unidad": "C",
+          "valor_min": 10.0,
+          "valor_max": 40.0,
+          "niveles": [
+            {"nivel": "normal", "limite_inferior": 10.0, "limite_superior": 25.0},
+            {"nivel": "precaucion", "limite_inferior": 25.0, "limite_superior": 35.0},
+            {"nivel": "critico", "limite_inferior": 35.0, "limite_superior": 40.0}
+          ]
+        }
+      ],
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 32.5, "unidad": "C"},
+        {"t": 0, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"}
+      ],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "CRITICO", "severidad_regla": "CRITICO", "severidad_rf55_1": "MODERADO", "severidad_origen": "RF-55.2"}]
+    },
+    {
+      "nombre": "M4 TC-M03-089 empate CRITICO (decide RF-55.2)",
+      "lecturas": [
+        {"t": 0, "variable": "temperatura_ambiente", "valor": 32.0, "unidad": "C"},
+        {"t": 0, "variable": "humedad_relativa", "valor": 78.0, "unidad": "%"}
+      ],
+      "esperado": [{"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "CRITICO", "severidad_regla": "CRITICO", "severidad_rf55_1": "CRITICO", "severidad_origen": "RF-55.2", "valores_derivados": {"THI": 85.78}}]
     }
   ]
 }

@@ -18,6 +18,7 @@ from edge_agent.agent import Agent
 from edge_agent.buffer import Buffer
 from edge_agent.config import ConfigError, Settings
 from edge_agent.config_store import ConfigStore, DeviceConfig, UmbralStore
+from edge_agent.historial import Historial
 from edge_agent.mqtt_client import Event, MqttLink
 from edge_agent.reglas import perfil
 from edge_agent.reglas.store import ReglaStore
@@ -38,6 +39,7 @@ class Runtime:
     store: ConfigStore
     agent: Agent
     source: DataSource
+    historial: Historial | None = None
 
     def start(self) -> None:
         start = getattr(self.source, "start", None)
@@ -51,6 +53,8 @@ class Runtime:
         if stop is not None:
             stop()
         self.buffer.close()
+        if self.historial is not None:
+            self.historial.close()
 
 
 def build(settings: Settings) -> Runtime:
@@ -73,10 +77,20 @@ def build(settings: Settings) -> Runtime:
     rf55 = perfil.verificar(
         settings.state_path.parent, forzar_deshabilitado=settings.rf55_2_deshabilitar
     )
+    # Log local de clasificaciones (TC-M03-100), independiente del buffer.
+    historial = Historial(settings.historial_path, settings.historial_max_filas)
     agent = Agent(
-        settings, link, store, buffer, source, umbrales=umbrales, reglas=reglas, rf55=rf55
+        settings,
+        link,
+        store,
+        buffer,
+        source,
+        umbrales=umbrales,
+        reglas=reglas,
+        rf55=rf55,
+        historial=historial,
     )
-    return Runtime(settings, events, link, buffer, store, agent, source)
+    return Runtime(settings, events, link, buffer, store, agent, source, historial)
 
 
 def _build_source(settings: Settings) -> DataSource:

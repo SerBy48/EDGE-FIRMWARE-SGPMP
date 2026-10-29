@@ -10,6 +10,7 @@ from edge_agent.agent import Agent
 from edge_agent.buffer import Buffer
 from edge_agent.config import FakeVariable, Settings
 from edge_agent.config_store import ConfigStore, DeviceConfig, UmbralStore
+from edge_agent.historial import Historial
 from edge_agent.reglas.store import ReglaStore
 from edge_agent.sources import FakeLoraSource
 
@@ -69,7 +70,9 @@ class FakeLink:
 
 
 class Harness:
-    def __init__(self, tmp_path: Path, connected: bool = True, **overrides) -> None:
+    def __init__(
+        self, tmp_path: Path, connected: bool = True, historial: bool = False, **overrides
+    ) -> None:
         self.tmp_path = tmp_path
         self.settings = make_settings(tmp_path, **overrides)
         self.now = T0
@@ -84,6 +87,11 @@ class Harness:
         )
         self.umbrales = UmbralStore(tmp_path / "umbrales.json")
         self.reglas = ReglaStore(tmp_path / "reglas.json")
+        self.historial = (
+            Historial(self.settings.historial_path, self.settings.historial_max_filas)
+            if historial
+            else None
+        )
         self.agent = Agent(
             self.settings,
             self.link,
@@ -92,6 +100,7 @@ class Harness:
             FakeLoraSource(self.settings.fake_variables),
             umbrales=self.umbrales,
             reglas=self.reglas,
+            historial=self.historial,
             reloj_sincronizado=lambda: True,
             clock=lambda: self.now,
         )

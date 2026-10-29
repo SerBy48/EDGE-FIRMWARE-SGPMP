@@ -103,9 +103,15 @@ def test_con_varios_umbrales_rige_el_mas_restrictivo():
     assert evento.metadata["id_umbral_ambiental"] == 7
 
 
-def test_sin_umbral_para_la_variable_no_emite_ni_es_error():
-    assert evaluar(99.0, []) is None
-    assert evaluar(99.0, variable="humedad_relativa") is None
+def test_sin_umbral_para_la_variable_es_error_sin_severidad():
+    """TC-M03-083: no se inventa una clasificación con umbrales que no existen."""
+    evento = evaluar(99.0, [])
+    assert (evento.clasificacion, evento.severidad) == ("ERROR_CONFIGURACION", None)
+    assert evento.metadata["id_umbral_ambiental"] is None
+    assert evento.metadata["variable"] == "temperatura_ambiente"
+    assert evento.metadata["severidad_invalida"] is True
+    assert "severidad" not in a_payload(evento)
+    assert evaluar(99.0, variable="humedad_relativa").metadata["variable"] == "humedad_relativa"
 
 
 @pytest.mark.parametrize(

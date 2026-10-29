@@ -27,7 +27,7 @@ from datetime import datetime
 from typing import Any
 
 from edge_agent.config_store import DeviceConfig, Umbral
-from edge_agent.reglas.evaluador import MAX_REGLAS_ACTIVAS, validar_regla
+from edge_agent.reglas.evaluador import MAX_REGLAS_ACTIVAS, motivo_niveles, validar_regla
 from edge_agent.reglas.store import Regla
 
 TIPO_ACK = "ACK_CONFIGURACION"
@@ -169,10 +169,10 @@ def handle_umbral(
         return error("variable es obligatoria")
     if not isinstance(unidad, str):
         return error("unidad debe ser texto")
-    if not (_is_number(valor_min) and _is_number(valor_max) and valor_min < valor_max):
-        return error("valor_min y valor_max deben ser números con valor_min < valor_max")
-    if not isinstance(niveles, list) or not niveles or not all(map(_is_nivel, niveles)):
-        return error("niveles debe traer normal/precaucion/critico con límites numéricos")
+    # Misma forma que exige el evaluador: un umbral que no la cumple nunca se
+    # guarda (TC-M03-095/122).
+    if (motivo := motivo_niveles(valor_min, valor_max, niveles)) is not None:
+        return error(motivo)
     if version is not None and _epoch(version) is None:
         return error("version debe ser una fecha ISO 8601 con zona o null")
 
@@ -321,15 +321,6 @@ def _is_positive_number(value: Any) -> bool:
 
 def _is_number(value: Any) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
-
-
-def _is_nivel(value: Any) -> bool:
-    return (
-        isinstance(value, dict)
-        and value.get("nivel") in _NIVELES
-        and _is_number(value.get("limite_inferior"))
-        and _is_number(value.get("limite_superior"))
-    )
 
 
 def _version_epoch(version: str | None) -> float:

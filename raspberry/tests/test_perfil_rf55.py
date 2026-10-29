@@ -111,7 +111,11 @@ def test_deshabilitado_rf55_1_sigue_y_las_compuestas_no_corren(tmp_path, activo,
     h = Harness(tmp_path)
     h.agent = agente(h, Habilitacion(activo, ()))
     # La fuente falsa da 20-30 °C: fuera del umbral simple y de la regla Tipo A.
-    niveles = ({"nivel": "normal", "limite_inferior": 0.0, "limite_superior": 10.0},)
+    niveles = (
+        {"nivel": "normal", "limite_inferior": 0.0, "limite_superior": 5.0},
+        {"nivel": "precaucion", "limite_inferior": 5.0, "limite_superior": 8.0},
+        {"nivel": "critico", "limite_inferior": 8.0, "limite_superior": 10.0},
+    )
     h.umbrales.set(Umbral(7, None, "temperatura_ambiente", "C", 0.0, 10.0, niveles))
     regla = {
         "nombre": "Temperatura alta",
