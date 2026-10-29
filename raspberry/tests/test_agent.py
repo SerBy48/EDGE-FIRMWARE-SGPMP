@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-10-29 | Arekkazu | TC-DIS-148 RF-54: metricas_buffer en el heartbeat              |
 import json
 
 from conftest import SERIAL, Harness
@@ -75,6 +78,13 @@ def test_heartbeat_periodico_con_campos_del_broker(harness):
     assert hb["reloj_sincronizado"] is True
     assert "version_firmware" in hb
     assert "estado_buffer_local" not in hb
+    # TC-DIS-148: contrato de MetricasBufferDTO del backend (4 llaves exactas).
+    assert hb["metricas_buffer"] == {
+        "capacidad_total": 1000,
+        "capacidad_utilizada": harness.buffer.total(),
+        "ultimo_timestamp_pendiente": None,
+        "politica_buffer_activa": "POLITICA_SOBRESCRITURA",
+    }
 
 
 def test_telemetria_espera_la_ventana_de_transmision(harness):
@@ -120,6 +130,8 @@ def test_reconexion_heartbeat_activo_vaciado_e_inactivo(tmp_path):
     first_hb = h.link.on("heartbeat")[0]
     assert first_hb["estado_local_buffer"] == "ACTIVO"
     assert first_hb["datos_pendientes_buffer"] > 0
+    assert first_hb["metricas_buffer"]["capacidad_utilizada"] == pendientes
+    assert first_hb["metricas_buffer"]["ultimo_timestamp_pendiente"] is not None
 
     tel = h.link.on("telemetry")
     assert len(tel) == pendientes
