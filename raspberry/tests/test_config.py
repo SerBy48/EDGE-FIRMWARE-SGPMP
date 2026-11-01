@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                    |
 # |------------|----------|----------------------------------------------------------------|
 # | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_FAKE_VARIABLES          |
+# | 2026-11-01 | SerBy48  | RF-23/RF-55: avisos por mapa RF-55 con errata o regla incompleta |
 import pytest
 
 from edge_agent.config import ConfigError, Settings, avisos_configuracion
@@ -115,7 +116,43 @@ def test_avisos_de_arranque_fake():
 
     completo = {
         **BASE_ENV,
-        "EDGE_FAKE_VARIABLES": "Temperatura Ambiental:°C:20:30:SEN-TEMP",
-        "EDGE_RF55_VARIABLES": "TEMPERATURA_AMBIENTAL=Temperatura Ambiental",
+        "EDGE_FAKE_VARIABLES": (
+            "Temperatura Ambiental:°C:20:30:SEN-TEMP;Humedad Relativa:%:40:90:SEN-HUM"
+        ),
+        "EDGE_RF55_VARIABLES": (
+            "TEMPERATURA_AMBIENTAL=Temperatura Ambiental;HUMEDAD_RELATIVA=Humedad Relativa"
+        ),
     }
     assert avisos_configuracion(Settings.from_env(completo)) == []
+
+
+@pytest.mark.parametrize(
+    "fake, rf55, esperado",
+    [
+        (
+            "Temperatura Ambiental:°C:20:30:T;Humedad Relativa:%:40:90:H",
+            "TEMPERATURA_AMBIENTAL=Temperatura Ambiental",
+            "ESTRES_TERMICO no disparará",
+        ),
+        (
+            "Temperatura Ambiental:°C:20:30:T;Humedad Relativa:%:40:90:H",
+            "TEMPERATURA_AMBIENTAL=Temperatura Ambiente;HUMEDAD_RELATIVA=Humedad Relativa",
+            "apunta a 'Temperatura Ambiente'",
+        ),
+        (
+            "Temperatura Ambiental:°C:20:30:T;Humedad Relativa:%:40:90:H",
+            "TEMPERATURA_AMBIENTAL=Temperatura;HUMEDAD_RELATIVA=Humedad",
+            "apunta a 'Humedad'",
+        ),
+        (
+            "temperatura_ambiente:°C:20:30:T;Humedad Relativa:%:40:90:H",
+            "",
+            "ESTRES_TERMICO no disparará",
+        ),
+    ],
+    ids=["mapa-parcial", "errata-en-un-nombre", "errata-en-ambos", "mezcla-sin-mapa"],
+)
+def test_avisos_de_regla_compuesta_que_no_dispararia(fake, rf55, esperado):
+    env = {**BASE_ENV, "EDGE_FAKE_VARIABLES": fake, "EDGE_RF55_VARIABLES": rf55}
+    avisos = avisos_configuracion(Settings.from_env(env))
+    assert any(esperado in a for a in avisos)

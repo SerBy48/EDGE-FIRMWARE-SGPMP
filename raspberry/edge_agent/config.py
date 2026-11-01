@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                    |
 # |------------|----------|----------------------------------------------------------------|
 # | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_FAKE/LORA_VARIABLES          |
+# | 2026-11-01 | SerBy48  | RF-23/RF-55: avisos por mapa RF-55 con errata o regla incompleta |
 """Configuración del edge_agent, leída de variables de entorno.
 
 En la Raspberry vienen de `/etc/sgpmp/edge-agent.env` (cargado por systemd con
@@ -421,8 +422,10 @@ def avisos_configuracion(settings: Settings) -> list[str]:
     - Ningún nombre de las reglas compuestas RF-55 coincide con las variables configuradas y
       no hay EDGE_RF55_VARIABLES: con los nombres del catálogo (`Temperatura Ambiental`…) la
       regla THI deja de disparar sin dar error.
+    - EDGE_RF55_VARIABLES apunta a una variable que no está configurada (p. ej. una errata).
+    - Una regla compuesta tiene solo parte de sus variables requeridas: tampoco dispara.
     """
-    from edge_agent.reglas.formulas import VARIABLES_DEFECTO
+    from edge_agent.reglas.formulas import FORMULAS, VARIABLES_DEFECTO
 
     if settings.lora is not None:
         variables = [
@@ -447,4 +450,20 @@ def avisos_configuracion(settings: Settings) -> list[str]:
             "dispararán. Ej.: EDGE_RF55_VARIABLES='TEMPERATURA_AMBIENTAL=Temperatura Ambiental;"
             "HUMEDAD_RELATIVA=Humedad Relativa'"
         )
+    if not nombres:
+        return avisos
+    avisos += [
+        f"EDGE_RF55_VARIABLES: {canonica} apunta a {variable!r}, que no está en {origen}"
+        for canonica, variable in settings.rf55_variables.items()
+        if variable not in nombres
+    ]
+    mapa = {**VARIABLES_DEFECTO, **settings.rf55_variables}
+    for formula in FORMULAS.values():
+        requeridas = [mapa.get(canonica, canonica) for canonica in formula.variables]
+        faltan = [variable for variable in requeridas if variable not in nombres]
+        if faltan and len(faltan) < len(requeridas):
+            avisos.append(
+                f"La regla compuesta {formula.codigo} no disparará: faltan {faltan} en {origen} "
+                "(revisar los nombres y EDGE_RF55_VARIABLES)"
+            )
     return avisos

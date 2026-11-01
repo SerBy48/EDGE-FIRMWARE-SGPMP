@@ -367,9 +367,11 @@ EDGE_LORA_VARIABLES='1=Temperatura Ambiental:°C:TEMPERATURA-SENSOR;2=Humedad Re
 EDGE_RF55_VARIABLES='TEMPERATURA_AMBIENTAL=Temperatura Ambiental;HUMEDAD_RELATIVA=Humedad Relativa'
 ```
 
-Al arrancar, el agente avisa (WARNING) por cada variable sin `sensor` y si
-falta `EDGE_RF55_VARIABLES`: si `--check-config` no muestra avisos, la
-configuración está completa.
+Al arrancar, el agente avisa (WARNING) por cada variable sin `sensor`, si
+falta `EDGE_RF55_VARIABLES` o apunta a una variable que no está configurada, y
+si una regla compuesta tiene solo parte de sus variables. `--check-config` no
+consulta la plataforma: sin avisos, aún hay que comprobar que los nombres
+existan en el catálogo y en los sensores del nodo.
 
 Validar antes de reiniciar:
 
@@ -499,8 +501,13 @@ El orden importa porque las versiones anteriores no entienden el tercer campo:
 
 1. Instalar la versión nueva (`install.sh` sin `--env`, conserva el `.env`).
 2. Editar `/etc/sgpmp/edge-agent.env` (`:sensor`, `°C`, `EDGE_RF55_VARIABLES`).
-3. `sudo -u sgpmp-edge /opt/sgpmp-edge/venv/bin/python -m edge_agent --check-config`
-   sin avisos, y `sudo systemctl restart edge-agent`.
+3. Validar (debe terminar sin avisos) y reiniciar:
+
+   ```bash
+   sudo systemd-run --pipe --wait -p EnvironmentFile=/etc/sgpmp/edge-agent.env \
+       /opt/sgpmp-edge/venv/bin/python -m edge_agent --check-config
+   sudo systemctl restart edge-agent
+   ```
 
 Para volver a una versión anterior, **primero quitar los `:sensor`** del `.env`
 y después instalarla: el parser anterior toma `%:HUMEDAD-SENSOR` como unidad y
