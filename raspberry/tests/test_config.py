@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_FAKE_VARIABLES          |
 import pytest
 
 from edge_agent.config import ConfigError, Settings
@@ -53,6 +56,13 @@ def test_variables_fake():
     assert [v.nombre for v in s.fake_variables] == ["temp", "hum"]
     with pytest.raises(ConfigError):
         Settings.from_env({**BASE_ENV, "EDGE_FAKE_VARIABLES": "temp:C:20"})
+
+
+def test_variables_fake_con_sensor():
+    s = Settings.from_env({**BASE_ENV, "EDGE_FAKE_VARIABLES": "temp:C:20:30:SEN-TEMP; hum:%:40:90"})
+    assert [(v.nombre, v.sensor) for v in s.fake_variables] == [("temp", "SEN-TEMP"), ("hum", None)]
+    with pytest.raises(ConfigError, match="sensor vacío"):
+        Settings.from_env({**BASE_ENV, "EDGE_FAKE_VARIABLES": "temp:C:20:30: "})
 
 
 def test_version_firmware_del_archivo_version(tmp_path):

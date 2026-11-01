@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: la lectura LoRa lleva el `sensor` configurado     |
 from datetime import UTC, datetime
 
 import pytest
@@ -14,7 +17,7 @@ NOW = 1_750_000_000.0
 
 
 class Env:
-    def __init__(self, nodes=None):
+    def __init__(self, nodes=None, variables=None):
         self.now = NOW
         self.spi = FakeSx1276Spi()
         radio = SX1276(self.spi, sleep=lambda s: None)
@@ -23,7 +26,8 @@ class Env:
             RadioConfig(freq_hz=915_000_000, tx_power_dbm=14),
             NET,
             nodes or {1: "IOT-A", 2: "IOT-B"},
-            {1: LoraVariable("temperatura_ambiente", "C"), 2: LoraVariable("humedad", "%")},
+            variables
+            or {1: LoraVariable("temperatura_ambiente", "C"), 2: LoraVariable("humedad", "%")},
             downlink_delay_s=0,
             clock=lambda: self.now,
             sleep=lambda s: None,
@@ -66,6 +70,20 @@ def test_telemetria_se_traduce_a_lecturas(env):
     assert readings[0].metadatos["lora"]["node_id"] == 1
     assert env.gw.read("IOT-A", env.dt) == []  # se drena
     assert env.gw.read("IOT-B", env.dt) == []
+
+
+def test_lectura_lleva_el_sensor_configurado():
+    env = Env(
+        variables={
+            1: LoraVariable("Temperatura Corporal", "°C", "SEN-TEMP"),
+            2: LoraVariable("Humedad Relativa", "%"),
+        }
+    )
+    env.rx(1, 5, p.Telemetria(0, (p.Measurement(1, 38.6), p.Measurement(2, 60.0))))
+    assert [(x.variable, x.sensor) for x in env.gw.read("IOT-A", env.dt)] == [
+        ("Temperatura Corporal", "SEN-TEMP"),
+        ("Humedad Relativa", None),
+    ]
 
 
 def test_code_sin_mapear_se_omite(env):

@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: la lectura lleva el `sensor` de EDGE_LORA_VARIABLES    |
 """Gateway LoRa del sitio: implementa `DataSource` con el SX1276 real (Fase 2).
 
 Un hilo propio es el único que toca la radio: escucha en RX continuo,
@@ -32,6 +35,7 @@ logger = logging.getLogger(__name__)
 class LoraVariable:
     nombre: str
     unidad: str
+    sensor: str | None = None
 
 
 @dataclass
@@ -378,6 +382,7 @@ class LoraGateway:
                     valor_crudo=round(measurement.value, 4),
                     unidad=variable.unidad,
                     timestamp_captura=captured,
+                    sensor=variable.sensor,
                     nivel_bateria_pct=node.bateria_pct,
                     calidad_senal_rssi=node.rssi_dbm,
                     calidad_senal_snr=node.snr_db,

@@ -14,7 +14,7 @@ documento de resultados.
 | Nodos flasheados | `pio run -e nodemcuv2 -t upload` con el `secrets.ini` de cada nodo (`lora-key <serial>`, `INSTALACION_RASPBERRY.md` §9.3) | El monitor serie muestra `[boot] nodo <serial>` y la misma huella de clave que el log de la Raspberry |
 | Raspberry instalada | `sudo raspberry/scripts/install.sh --env ...` con `EDGE_SOURCE=lora` | `systemctl status edge-agent` activo; log "Gateway LoRa escuchando" |
 | Seriales registrados | Cada serial de nodo de `EDGE_SERIALS` existe en `modulo9.dispositivos_iot` y apunta a este Gateway Edge | `GET /v1/devices` los lista |
-| Variables | Cada `nombre` de `EDGE_LORA_VARIABLES` existe en `modulo9.variables_ambientales` | La telemetría aparece en la BD, sin `VariableNotFoundError` en el broker |
+| Variables | Cada `nombre` y `unidad` de `EDGE_LORA_VARIABLES` existen en `modulo9.variables_ambientales`, y cada `sensor` es un sensor del nodo en la plataforma | La telemetría aparece en la BD en el sensor correcto, sin `ERROR_UNIDAD` ni `ERROR_SENSOR` en `sgpmp/<serial>/resultado` |
 
 Para las pruebas de enlace (L1–L4) se usa el monitor, con el servicio detenido
 porque la radio es una sola:

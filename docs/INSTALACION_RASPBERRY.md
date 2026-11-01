@@ -163,10 +163,11 @@ Notas:
   el broker ajusta el permiso sin rotar la contraseña; aquí basta con editar
   `EDGE_SERIALS` y reiniciar. Desactivar el Gateway Edge desactiva en cascada
   sus dispositivos y revoca la credencial.
-- `EDGE_FAKE_VARIABLES`: el nombre debe existir en
-  `modulo9.variables_ambientales`. Si no existe, el broker descarta la
-  telemetría, pero heartbeat y comandos funcionan igual. Se puede dejar
-  vacío.
+- `EDGE_FAKE_VARIABLES`: `nombre:unidad:min:max[:sensor]`. El nombre y la
+  unidad deben ser exactos a `modulo9.variables_ambientales` (`°C`, no `C`).
+  Si no existen, el broker descarta la telemetría, pero heartbeat y comandos
+  funcionan igual. `sensor` es el nombre del sensor del dispositivo en la
+  plataforma (ver `EDGE_LORA_VARIABLES`). Se puede dejar vacío.
 - Si la contraseña tiene espacios, `#` o comillas, ponerla entre comillas
   dobles y escapar `"` y `\` con `\`.
 - Guardar con `Ctrl+O`, `Enter`, `Ctrl+X`.
@@ -321,7 +322,7 @@ Cambiar `EDGE_SOURCE=lora` y agregar:
 EDGE_LORA_FREQ_HZ=<frecuencia confirmada, ej. 915000000>
 EDGE_LORA_TX_POWER_DBM=<potencia confirmada>
 EDGE_LORA_NET_ID=0x01
-EDGE_LORA_VARIABLES=1=temperatura_ambiente:C;2=humedad_relativa:%;3=<nombre>:C;4=<nombre>:g;5=<nombre>:g;6=<nombre>:deg;7=<nombre>:deg;8=<nombre>:BPM;9=<nombre>:%
+EDGE_LORA_VARIABLES='1=Temperatura Ambiental:°C:<sensor>;2=Humedad Relativa:%:<sensor>;3=<nombre>:<unidad>:<sensor>;…;9=<nombre>:<unidad>:<sensor>'
 EDGE_LORA_RESET_GPIO=25
 ```
 
@@ -334,11 +335,16 @@ EDGE_LORA_RESET_GPIO=25
   reflashear todos los nodos. **Copiarlo a un lugar seguro fuera de la Pi**:
   con él, una Pi de reemplazo deriva las mismas claves y los nodos siguen
   funcionando sin reflashear.
-- `EDGE_LORA_VARIABLES`: `code=nombre:unidad`. Los codes son los del
+- `EDGE_LORA_VARIABLES`: `code=nombre:unidad[:sensor]`. Los codes son los del
   catálogo de sensores del firmware (`esp32/README.md`, "Codes de
   variable"): 1–2 DHT22, 3 DS18B20, 4–7 MPU6050, 8–9 MAX30102. Cada
-  `<nombre>` es el nombre con que esa variable existe en la BD. Basta con
-  mapear los de los sensores que tienen los nodos del sitio.
+  `<nombre>` y su unidad son los exactos con que esa variable existe en la BD.
+  `sensor` es el **nombre del sensor** registrado en la plataforma para el
+  nodo (Configuración → Dispositivos IoT → sensores; único por dispositivo).
+  Es obligatorio si el nodo tiene más de un sensor activo: sin él el broker
+  rechaza la lectura con `ERROR_SENSOR`, porque no sabe a cuál pertenece.
+  Todos los nodos del sitio deben nombrar igual el sensor de un mismo code.
+  Basta con mapear los de los sensores que tienen los nodos del sitio.
 - **Nodos con firmware v1** (antes de la v0.3 del firmware): mientras se
   reflashean, se siguen aceptando con `EDGE_LORA_NODES=1=<serial>`. Cuando
   todos usan v2, poner `EDGE_LORA_ACEPTAR_V1=0` y borrar `EDGE_LORA_NODES`.
