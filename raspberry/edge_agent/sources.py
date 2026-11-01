@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: la lectura simulada lleva su `sensor`                  |
 """Fuentes de lecturas de sensores.
 
 `DataSource` es la interfaz que usa el agente. `FakeLoraSource` genera datos
@@ -67,6 +70,7 @@ class FakeLoraSource:
                 valor_crudo=round(self._rng.uniform(var.minimo, var.maximo), 2),
                 unidad=var.unidad,
                 timestamp_captura=now,
+                sensor=var.sensor,
             )
             for var in self._variables
         ]

@@ -1,3 +1,7 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_FAKE/LORA_VARIABLES          |
+# | 2026-11-01 | SerBy48  | RF-23/RF-55: avisos por mapa RF-55 con errata o regla incompleta |
 """Configuración del edge_agent, leída de variables de entorno.
 
 En la Raspberry vienen de `/etc/sgpmp/edge-agent.env` (cargado por systemd con
@@ -31,6 +35,7 @@ class FakeVariable:
     unidad: str
     minimo: float
     maximo: float
+    sensor: str | None = None  # `nombre` del sensor en la plataforma (único por dispositivo)
 
 
 @dataclass(frozen=True)
@@ -45,7 +50,7 @@ class LoraSettings:
     sync_word: int
     net_id: int
     nodes: dict[int, str]  # v1: node_id -> serial MQTT (EDGE_LORA_NODES)
-    variables: dict[int, tuple[str, str]]  # code -> (nombre, unidad)
+    variables: dict[int, tuple[str, str, str | None]]  # code -> (nombre, unidad, sensor)
     spi_bus: int
     spi_device: int
     reset_gpio: int | None
@@ -265,16 +270,32 @@ def _positive_float(env: Mapping[str, str], name: str, default: float | None = N
     return value
 
 
+def _sensor_opcional(raw: str | None, nombre_var: str, item: str) -> str | None:
+    if raw is None:
+        return None
+    sensor = raw.strip()
+    if not sensor:
+        raise ConfigError(f"{nombre_var}: nombre de sensor vacío en {item!r}")
+    return sensor
+
+
 def _parse_fake_variables(raw: str) -> tuple[FakeVariable, ...]:
-    """Formato: `nombre:unidad:min:max;nombre:unidad:min:max`."""
+    """Formato: `nombre:unidad:min:max[:sensor];...`.
+
+    `sensor` es el nombre del sensor registrado en la plataforma; el broker lo exige si el
+    dispositivo tiene más de un sensor activo.
+    """
     variables = []
     for item in filter(None, (part.strip() for part in raw.split(";"))):
         parts = item.split(":")
-        if len(parts) != 4:
+        if len(parts) not in (4, 5):
             raise ConfigError(f"EDGE_FAKE_VARIABLES mal formado en {item!r}")
-        nombre, unidad, minimo, maximo = parts
+        nombre, unidad, minimo, maximo = parts[:4]
+        sensor = _sensor_opcional(
+            parts[4] if len(parts) == 5 else None, "EDGE_FAKE_VARIABLES", item
+        )
         try:
-            variables.append(FakeVariable(nombre, unidad, float(minimo), float(maximo)))
+            variables.append(FakeVariable(nombre, unidad, float(minimo), float(maximo), sensor))
         except ValueError as exc:
             raise ConfigError(f"EDGE_FAKE_VARIABLES: rango no numérico en {item!r}") from exc
     return tuple(variables)
@@ -330,14 +351,19 @@ def parse_lora_settings(
             "Falta EDGE_LORA_SECRETO_SITIO (lo genera install.sh) o, para nodos v1, EDGE_LORA_NODES"
         )
 
-    variables: dict[int, tuple[str, str]] = {}
+    variables: dict[int, tuple[str, str, str | None]] = {}
     raw_vars = _parse_mapping(_require(env, "EDGE_LORA_VARIABLES"), "EDGE_LORA_VARIABLES", ";")
     for key, value in raw_vars.items():
         code = _parse_int_value(key, "EDGE_LORA_VARIABLES", 0, 0xFF)
-        nombre, sep, unidad = value.partition(":")
-        if not sep or not nombre:
-            raise ConfigError(f"EDGE_LORA_VARIABLES: se espera code=nombre:unidad en {value!r}")
-        variables[code] = (nombre, unidad)
+        partes = value.split(":")
+        if len(partes) not in (2, 3) or not partes[0]:
+            raise ConfigError(
+                f"EDGE_LORA_VARIABLES: se espera code=nombre:unidad[:sensor] en {value!r}"
+            )
+        sensor = _sensor_opcional(
+            partes[2] if len(partes) == 3 else None, "EDGE_LORA_VARIABLES", value
+        )
+        variables[code] = (partes[0], partes[1], sensor)
 
     reset = env.get("EDGE_LORA_RESET_GPIO", "").strip()
     return LoraSettings(
@@ -386,3 +412,58 @@ def _parse_int_value(raw: str, name: str, minimo: int, maximo: int) -> int:
     if not minimo <= value <= maximo:
         raise ConfigError(f"{name}: {value} fuera de rango [{minimo}, {maximo}]")
     return value
+
+
+def avisos_configuracion(settings: Settings) -> list[str]:
+    """Configuración válida pero que probablemente no hace lo esperado (se loguea al arrancar).
+
+    - Variable sin `sensor`: si el nodo tiene más de un sensor activo en la plataforma, el
+      broker rechaza la lectura (ERROR_SENSOR) y el Edge no se entera.
+    - Ningún nombre de las reglas compuestas RF-55 coincide con las variables configuradas y
+      no hay EDGE_RF55_VARIABLES: con los nombres del catálogo (`Temperatura Ambiental`…) la
+      regla THI deja de disparar sin dar error.
+    - EDGE_RF55_VARIABLES apunta a una variable que no está configurada (p. ej. una errata).
+    - Una regla compuesta tiene solo parte de sus variables requeridas: tampoco dispara.
+    """
+    from edge_agent.reglas.formulas import FORMULAS, VARIABLES_DEFECTO
+
+    if settings.lora is not None:
+        variables = [
+            (f"code {code} ({nombre})", nombre, sensor)
+            for code, (nombre, _, sensor) in sorted(settings.lora.variables.items())
+        ]
+        origen = "EDGE_LORA_VARIABLES"
+    else:
+        variables = [(v.nombre, v.nombre, v.sensor) for v in settings.fake_variables]
+        origen = "EDGE_FAKE_VARIABLES"
+    avisos = [
+        f"{origen}: {etiqueta} sin `sensor`; si el nodo tiene más de un sensor "
+        "activo en la plataforma, el broker rechaza la lectura (ERROR_SENSOR)"
+        for etiqueta, _, sensor in variables
+        if sensor is None
+    ]
+    nombres = {nombre for _, nombre, _ in variables}
+    if nombres and not settings.rf55_variables and not nombres & set(VARIABLES_DEFECTO.values()):
+        avisos.append(
+            "EDGE_RF55_VARIABLES vacía y ninguna variable usa los nombres por defecto de las "
+            "reglas RF-55 (p. ej. temperatura_ambiente): las reglas compuestas como THI no "
+            "dispararán. Ej.: EDGE_RF55_VARIABLES='TEMPERATURA_AMBIENTAL=Temperatura Ambiental;"
+            "HUMEDAD_RELATIVA=Humedad Relativa'"
+        )
+    if not nombres:
+        return avisos
+    avisos += [
+        f"EDGE_RF55_VARIABLES: {canonica} apunta a {variable!r}, que no está en {origen}"
+        for canonica, variable in settings.rf55_variables.items()
+        if variable not in nombres
+    ]
+    mapa = {**VARIABLES_DEFECTO, **settings.rf55_variables}
+    for formula in FORMULAS.values():
+        requeridas = [mapa.get(canonica, canonica) for canonica in formula.variables]
+        faltan = [variable for variable in requeridas if variable not in nombres]
+        if faltan and len(faltan) < len(requeridas):
+            avisos.append(
+                f"La regla compuesta {formula.codigo} no disparará: faltan {faltan} en {origen} "
+                "(revisar los nombres y EDGE_RF55_VARIABLES)"
+            )
+    return avisos

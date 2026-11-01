@@ -1,6 +1,9 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_LORA_VARIABLES          |
 import pytest
 
-from edge_agent.config import ConfigError, Settings
+from edge_agent.config import ConfigError, Settings, avisos_configuracion
 
 BASE = {
     "EDGE_MQTT_HOST": "broker.test",
@@ -23,9 +26,19 @@ def test_config_lora_completa():
     lora = Settings.from_env(BASE).lora
     assert lora.net_id == 0x2A
     assert lora.nodes == {1: "IOT-A", 2: "IOT-B"}
-    assert lora.variables[2] == ("humedad_relativa", "%")
+    assert lora.variables[2] == ("humedad_relativa", "%", None)
     assert (lora.sf, lora.bw_hz, lora.cr, lora.sync_word) == (9, 125_000, 5, 0x12)
     assert lora.reset_gpio is None
+
+
+def test_variable_lora_con_sensor():
+    variables = "1=Temperatura Corporal:°C: SEN-TEMP ; 2=Humedad Relativa:%"
+    env = {**BASE, "EDGE_LORA_VARIABLES": variables}
+    lora = Settings.from_env(env).lora
+    assert lora.variables == {
+        1: ("Temperatura Corporal", "°C", "SEN-TEMP"),
+        2: ("Humedad Relativa", "%", None),
+    }
 
 
 def test_fake_no_trae_lora():
@@ -48,6 +61,8 @@ def test_obligatorios_sin_default(key):
         {"EDGE_LORA_NODES": "0=IOT-A"},  # 0 reservado al gateway
         {"EDGE_LORA_NODES": "1=IOT-A,1=IOT-B"},
         {"EDGE_LORA_VARIABLES": "1=temperatura"},  # sin unidad
+        {"EDGE_LORA_VARIABLES": "1=temperatura:C:"},  # sensor vacío
+        {"EDGE_LORA_VARIABLES": "1=temperatura:C:SEN:extra"},
         {"EDGE_LORA_NET_ID": "300"},
         {"EDGE_SOURCE": "otra"},
     ],
@@ -103,3 +118,12 @@ def test_config_colision_de_node_id(monkeypatch):
     monkeypatch.setattr(keys, "node_id_de", lambda serial: 0x1234)
     with pytest.raises(ConfigError, match="mismo node_id"):
         Settings.from_env({**BASE, "EDGE_LORA_SECRETO_SITIO": SECRETO})
+
+
+def test_avisos_de_arranque_lora():
+    # BASE usa los nombres por defecto de RF-55 (temperatura_ambiente): solo falta `sensor`.
+    avisos = avisos_configuracion(Settings.from_env(BASE))
+    assert [a.split(" (")[0] for a in avisos] == [
+        "EDGE_LORA_VARIABLES: code 1",
+        "EDGE_LORA_VARIABLES: code 2",
+    ]

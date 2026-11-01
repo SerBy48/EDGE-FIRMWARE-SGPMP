@@ -1,6 +1,10 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_FAKE_VARIABLES          |
+# | 2026-11-01 | SerBy48  | RF-23/RF-55: avisos por mapa RF-55 con errata o regla incompleta |
 import pytest
 
-from edge_agent.config import ConfigError, Settings
+from edge_agent.config import ConfigError, Settings, avisos_configuracion
 
 BASE_ENV = {
     "EDGE_MQTT_HOST": "broker.test",
@@ -55,6 +59,13 @@ def test_variables_fake():
         Settings.from_env({**BASE_ENV, "EDGE_FAKE_VARIABLES": "temp:C:20"})
 
 
+def test_variables_fake_con_sensor():
+    s = Settings.from_env({**BASE_ENV, "EDGE_FAKE_VARIABLES": "temp:C:20:30:SEN-TEMP; hum:%:40:90"})
+    assert [(v.nombre, v.sensor) for v in s.fake_variables] == [("temp", "SEN-TEMP"), ("hum", None)]
+    with pytest.raises(ConfigError, match="sensor vacío"):
+        Settings.from_env({**BASE_ENV, "EDGE_FAKE_VARIABLES": "temp:C:20:30: "})
+
+
 def test_version_firmware_del_archivo_version(tmp_path):
     version = tmp_path / "VERSION"
     version.write_text("v0.2.0-3-gabc1234\n")
@@ -95,3 +106,53 @@ def test_version_firmware_semver(tmp_path, describe, esperada):
     version.write_text(describe + "\n")
     s = Settings.from_env({**BASE_ENV, "EDGE_VERSION_FILE": str(version)})
     assert s.firmware_version == esperada.format(v=__version__)
+
+
+def test_avisos_de_arranque_fake():
+    sin_sensor = {**BASE_ENV, "EDGE_FAKE_VARIABLES": "Temperatura Ambiental:°C:20:30"}
+    avisos = avisos_configuracion(Settings.from_env(sin_sensor))
+    assert any("sin `sensor`" in a for a in avisos)
+    assert any("EDGE_RF55_VARIABLES vacía" in a for a in avisos)
+
+    completo = {
+        **BASE_ENV,
+        "EDGE_FAKE_VARIABLES": (
+            "Temperatura Ambiental:°C:20:30:SEN-TEMP;Humedad Relativa:%:40:90:SEN-HUM"
+        ),
+        "EDGE_RF55_VARIABLES": (
+            "TEMPERATURA_AMBIENTAL=Temperatura Ambiental;HUMEDAD_RELATIVA=Humedad Relativa"
+        ),
+    }
+    assert avisos_configuracion(Settings.from_env(completo)) == []
+
+
+@pytest.mark.parametrize(
+    "fake, rf55, esperado",
+    [
+        (
+            "Temperatura Ambiental:°C:20:30:T;Humedad Relativa:%:40:90:H",
+            "TEMPERATURA_AMBIENTAL=Temperatura Ambiental",
+            "ESTRES_TERMICO no disparará",
+        ),
+        (
+            "Temperatura Ambiental:°C:20:30:T;Humedad Relativa:%:40:90:H",
+            "TEMPERATURA_AMBIENTAL=Temperatura Ambiente;HUMEDAD_RELATIVA=Humedad Relativa",
+            "apunta a 'Temperatura Ambiente'",
+        ),
+        (
+            "Temperatura Ambiental:°C:20:30:T;Humedad Relativa:%:40:90:H",
+            "TEMPERATURA_AMBIENTAL=Temperatura;HUMEDAD_RELATIVA=Humedad",
+            "apunta a 'Humedad'",
+        ),
+        (
+            "temperatura_ambiente:°C:20:30:T;Humedad Relativa:%:40:90:H",
+            "",
+            "ESTRES_TERMICO no disparará",
+        ),
+    ],
+    ids=["mapa-parcial", "errata-en-un-nombre", "errata-en-ambos", "mezcla-sin-mapa"],
+)
+def test_avisos_de_regla_compuesta_que_no_dispararia(fake, rf55, esperado):
+    env = {**BASE_ENV, "EDGE_FAKE_VARIABLES": fake, "EDGE_RF55_VARIABLES": rf55}
+    avisos = avisos_configuracion(Settings.from_env(env))
+    assert any(esperado in a for a in avisos)
