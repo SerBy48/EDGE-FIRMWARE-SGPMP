@@ -3,7 +3,7 @@
 # | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_FAKE_VARIABLES          |
 import pytest
 
-from edge_agent.config import ConfigError, Settings
+from edge_agent.config import ConfigError, Settings, avisos_configuracion
 
 BASE_ENV = {
     "EDGE_MQTT_HOST": "broker.test",
@@ -105,3 +105,17 @@ def test_version_firmware_semver(tmp_path, describe, esperada):
     version.write_text(describe + "\n")
     s = Settings.from_env({**BASE_ENV, "EDGE_VERSION_FILE": str(version)})
     assert s.firmware_version == esperada.format(v=__version__)
+
+
+def test_avisos_de_arranque_fake():
+    sin_sensor = {**BASE_ENV, "EDGE_FAKE_VARIABLES": "Temperatura Ambiental:°C:20:30"}
+    avisos = avisos_configuracion(Settings.from_env(sin_sensor))
+    assert any("sin `sensor`" in a for a in avisos)
+    assert any("EDGE_RF55_VARIABLES vacía" in a for a in avisos)
+
+    completo = {
+        **BASE_ENV,
+        "EDGE_FAKE_VARIABLES": "Temperatura Ambiental:°C:20:30:SEN-TEMP",
+        "EDGE_RF55_VARIABLES": "TEMPERATURA_AMBIENTAL=Temperatura Ambiental",
+    }
+    assert avisos_configuracion(Settings.from_env(completo)) == []

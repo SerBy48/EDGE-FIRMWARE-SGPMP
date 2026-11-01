@@ -348,6 +348,28 @@ EDGE_LORA_RESET_GPIO=25
 - **Nodos con firmware v1** (antes de la v0.3 del firmware): mientras se
   reflashean, se siguen aceptando con `EDGE_LORA_NODES=1=<serial>`. Cuando
   todos usan v2, poner `EDGE_LORA_ACEPTAR_V1=0` y borrar `EDGE_LORA_NODES`.
+- `EDGE_RF55_VARIABLES`: las reglas compuestas de RF-55 (THI…) usan nombres
+  internos (`TEMPERATURA_AMBIENTAL`…) que por defecto apuntan a
+  `temperatura_ambiente`/`humedad_relativa`. Si las variables usan los nombres
+  del catálogo, hay que traducirlos aquí; si no, la regla THI deja de disparar
+  sin dar error. Los umbrales RF-17 no lo necesitan: llegan con el nombre del
+  catálogo.
+
+**Ejemplo completo (DEV: ESP32 con DHT22 y DS18B20).** Antes, registrar en la
+plataforma un sensor por variable en el nodo, con calibración: aquí
+`TEMPERATURA-SENSOR` (DHT22 temperatura), `HUMEDAD-SENSOR` (DHT22 humedad) y
+`DS18B20` (temperatura del agua). Las comillas simples hacen falta porque los
+nombres llevan espacios:
+
+```ini
+EDGE_SERIALS=RASPBERRY3B-TEST,ESP32-86-TEST
+EDGE_LORA_VARIABLES='1=Temperatura Ambiental:°C:TEMPERATURA-SENSOR;2=Humedad Relativa:%:HUMEDAD-SENSOR;3=Temperatura del agua:°C:DS18B20'
+EDGE_RF55_VARIABLES='TEMPERATURA_AMBIENTAL=Temperatura Ambiental;HUMEDAD_RELATIVA=Humedad Relativa'
+```
+
+Al arrancar, el agente avisa (WARNING) por cada variable sin `sensor` y si
+falta `EDGE_RF55_VARIABLES`: si `--check-config` no muestra avisos, la
+configuración está completa.
 
 Validar antes de reiniciar:
 
@@ -471,6 +493,18 @@ sudo ./raspberry/scripts/install.sh     # sin --env: conserva /etc/sgpmp/edge-ag
 ```
 
 Después, la automática sigue desde lo que se instaló a mano.
+
+**Agregar `:sensor` a `EDGE_LORA_VARIABLES` (firmware con ese campo, RF-23).**
+El orden importa porque las versiones anteriores no entienden el tercer campo:
+
+1. Instalar la versión nueva (`install.sh` sin `--env`, conserva el `.env`).
+2. Editar `/etc/sgpmp/edge-agent.env` (`:sensor`, `°C`, `EDGE_RF55_VARIABLES`).
+3. `sudo -u sgpmp-edge /opt/sgpmp-edge/venv/bin/python -m edge_agent --check-config`
+   sin avisos, y `sudo systemctl restart edge-agent`.
+
+Para volver a una versión anterior, **primero quitar los `:sensor`** del `.env`
+y después instalarla: el parser anterior toma `%:HUMEDAD-SENSOR` como unidad y
+el broker rechaza la lectura por `ERROR_UNIDAD`.
 
 ## 12. Solución de problemas
 

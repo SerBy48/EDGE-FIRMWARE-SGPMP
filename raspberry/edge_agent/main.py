@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                    |
+# |------------|----------|----------------------------------------------------------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-55: loguea los avisos de configuración al arrancar    |
 """Punto de entrada: `python -m edge_agent` (o `edge-agent` si está instalado).
 
 `--check-config` valida la configuración y sale, sin conectarse: lo usa
@@ -16,7 +19,7 @@ from dataclasses import dataclass
 
 from edge_agent.agent import Agent
 from edge_agent.buffer import Buffer
-from edge_agent.config import ConfigError, Settings
+from edge_agent.config import ConfigError, Settings, avisos_configuracion
 from edge_agent.config_store import ConfigStore, DeviceConfig, UmbralStore
 from edge_agent.historial import Historial
 from edge_agent.mqtt_client import Event, MqttLink
@@ -145,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         # Exit != 0 sin traceback: systemd lo registra y reintenta.
         logger.error("Configuración inválida: %s", exc)
         return 2
+    for aviso in avisos_configuracion(settings):
+        logger.warning(aviso)
     if args.check_config:
         logger.info("Configuración válida: %s", settings)
         return 0

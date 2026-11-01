@@ -411,3 +411,40 @@ def _parse_int_value(raw: str, name: str, minimo: int, maximo: int) -> int:
     if not minimo <= value <= maximo:
         raise ConfigError(f"{name}: {value} fuera de rango [{minimo}, {maximo}]")
     return value
+
+
+def avisos_configuracion(settings: Settings) -> list[str]:
+    """Configuración válida pero que probablemente no hace lo esperado (se loguea al arrancar).
+
+    - Variable sin `sensor`: si el nodo tiene más de un sensor activo en la plataforma, el
+      broker rechaza la lectura (ERROR_SENSOR) y el Edge no se entera.
+    - Ningún nombre de las reglas compuestas RF-55 coincide con las variables configuradas y
+      no hay EDGE_RF55_VARIABLES: con los nombres del catálogo (`Temperatura Ambiental`…) la
+      regla THI deja de disparar sin dar error.
+    """
+    from edge_agent.reglas.formulas import VARIABLES_DEFECTO
+
+    if settings.lora is not None:
+        variables = [
+            (f"code {code} ({nombre})", nombre, sensor)
+            for code, (nombre, _, sensor) in sorted(settings.lora.variables.items())
+        ]
+        origen = "EDGE_LORA_VARIABLES"
+    else:
+        variables = [(v.nombre, v.nombre, v.sensor) for v in settings.fake_variables]
+        origen = "EDGE_FAKE_VARIABLES"
+    avisos = [
+        f"{origen}: {etiqueta} sin `sensor`; si el nodo tiene más de un sensor "
+        "activo en la plataforma, el broker rechaza la lectura (ERROR_SENSOR)"
+        for etiqueta, _, sensor in variables
+        if sensor is None
+    ]
+    nombres = {nombre for _, nombre, _ in variables}
+    if nombres and not settings.rf55_variables and not nombres & set(VARIABLES_DEFECTO.values()):
+        avisos.append(
+            "EDGE_RF55_VARIABLES vacía y ninguna variable usa los nombres por defecto de las "
+            "reglas RF-55 (p. ej. temperatura_ambiente): las reglas compuestas como THI no "
+            "dispararán. Ej.: EDGE_RF55_VARIABLES='TEMPERATURA_AMBIENTAL=Temperatura Ambiental;"
+            "HUMEDAD_RELATIVA=Humedad Relativa'"
+        )
+    return avisos
