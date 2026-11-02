@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                     |
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-11-02 | Arekkazu | V1 RF-53: seguimiento y métricas de la cascada de visión         |
+# | 2026-11-02 | Arekkazu | V1 RF-53: individuos observados = máximo de la ventana           |
 """Cascada de visión con cajas sintéticas: sin modelo ni OpenCV."""
 
 from edge_vision.cascada import Seguidor, Ventana, iou
@@ -30,6 +31,15 @@ def test_un_animal_que_camina_y_otro_quieto_dan_actividad_media():
     assert v["componentes"]["tasa_movimiento"] == 0.015
     assert v["componentes"]["densidad_actividad"] == 0.5
     assert v["componentes"]["dispersion_espacial"] > 0
+
+
+def test_individuos_observados_es_el_maximo_visto_a_la_vez():
+    seg, ventana = Seguidor(), Ventana(diagonal=100.0)
+    for s, n in enumerate((3, 5, 2, 4)):
+        cajas = [(20.0 * k, 0.0, 10.0, 10.0) for k in range(n)]
+        seg.actualizar(float(s), cajas)
+        ventana.agregar_cuadro(cajas)
+    assert ventana.cerrar(seg, 0.0, 3.0)["n_individuos_observados"] == 5
 
 
 def test_un_track_que_desaparece_cuenta_como_perdido_y_sin_cuadros_todo_es_cero():

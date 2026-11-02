@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                     |
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-11-02 | Arekkazu | V1 RF-53: seguimiento y métricas de la cascada de visión (D4)    |
+# | 2026-11-02 | Arekkazu | V1 RF-53: individuos observados = máximo de la ventana (conteo)     |
 """Seguimiento de individuos y métricas de una ventana (cascada V1, sobre D4).
 
 Puro Python: no depende del detector ni de OpenCV, así que se prueba con cajas
@@ -169,5 +170,7 @@ class Ventana:
                 "n_tracks_perdidos": perdidos,
                 "fps_efectivo": round(min(cuadros / duracion, 999.99), 2),
             },
-            "n_individuos_observados": int(statistics.median(self.conteos)) if cuadros else 0,
+            # Máximo de animales vistos a la vez en la ventana: con oclusiones y movimiento la
+            # mediana cuenta de menos, y es lo que el backend compara con el inventario del lote.
+            "n_individuos_observados": max(self.conteos, default=0),
         }
