@@ -2,6 +2,7 @@
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-11-02 | Arekkazu | V1 RF-53: seguimiento y métricas de la cascada de visión         |
 """Cascada de visión con cajas sintéticas: sin modelo ni OpenCV."""
+
 from edge_vision.cascada import Seguidor, Ventana, iou
 
 
@@ -19,7 +20,12 @@ def test_un_animal_que_camina_y_otro_quieto_dan_actividad_media():
         ventana.agregar_cuadro(cajas)
     v = ventana.cerrar(seg, 0.0, 10.0)
     assert v["n_individuos_observados"] == 2
-    assert v["calidad"] == {"cobertura_ventana": 1.0, "n_tracks": 2, "n_tracks_perdidos": 0, "fps_efectivo": 1.1}
+    assert v["calidad"] == {
+        "cobertura_ventana": 1.0,
+        "n_tracks": 2,
+        "n_tracks_perdidos": 0,
+        "fps_efectivo": 1.1,
+    }
     # El que camina va a 0,03 D/s y el quieto a 0: media 0,015 y la mitad activos.
     assert v["componentes"]["tasa_movimiento"] == 0.015
     assert v["componentes"]["densidad_actividad"] == 0.5
@@ -38,4 +44,7 @@ def test_un_track_que_desaparece_cuenta_como_perdido_y_sin_cuadros_todo_es_cero(
     assert (v["calidad"]["n_tracks"], v["calidad"]["n_tracks_perdidos"]) == (1, 1)
     assert v["calidad"]["cobertura_ventana"] == round(3 / 7, 4)
     assert Ventana(diagonal=1.0).cerrar(Seguidor(), 0.0, 1.0)["componentes"] == {
-        "densidad_actividad": 0.0, "dispersion_espacial": 0.0, "tasa_movimiento": 0.0}
+        "densidad_actividad": 0.0,
+        "dispersion_espacial": 0.0,
+        "tasa_movimiento": 0.0,
+    }
