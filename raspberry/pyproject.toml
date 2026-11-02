@@ -23,6 +23,12 @@ lora = [
     "gpiozero>=2.0; sys_platform == 'linux'",
     "RPi.GPIO>=0.7.1; sys_platform == 'linux'",
 ]
+# Nodo con cámara (edge_vision, V1): detector YOLOv8n en ONNX, sin ultralytics.
+vision = [
+    "onnxruntime>=1.20",
+    "numpy>=2",
+    "opencv-python-headless>=4.10",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.5",
@@ -30,9 +36,10 @@ dev = [
 
 [project.scripts]
 edge-agent = "edge_agent.main:main"
+edge-vision = "edge_vision.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["edge_agent"]
+packages = ["edge_agent", "edge_vision"]
 
 [tool.ruff]
 line-length = 100
