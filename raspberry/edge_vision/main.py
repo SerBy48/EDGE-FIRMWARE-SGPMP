@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                     |
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-11-02 | Arekkazu | V1 RF-53: nodo de visión que publica el sobre D4 por MQTT        |
+# | 2026-11-02 | Arekkazu | V1 RF-53: la ventana lleva la captura con cajas (EDGE_VISION_CAPTURA) |
 """Nodo con cámara: cuadro → detector → seguimiento → métricas → sobre D4.
 
 El sobre sale por MQTT en `<prefijo>/<serial>/vision`.
@@ -20,6 +21,11 @@ Variables (las de MQTT son las mismas del edge_agent):
   EDGE_VISION_FPS=2  EDGE_VISION_VENTANA_S=60
   EDGE_VISION_CONFIANZA=0.35  EDGE_VISION_UMBRAL_ACTIVO=0.02
   EDGE_VISION_ESTADO_CALIBRACION=CALIBRADO
+  EDGE_VISION_CAPTURA=1      0: no envía la imagen (solo el vector)
+
+Con EDGE_VISION_CAPTURA=1 el mensaje lleva además `captura`: el último cuadro de la ventana con
+las cajas y el número de cada animal (JPEG base64). No es parte del sobre D4: el broker la separa
+y el backend guarda solo las más recientes de cada cámara.
 """
 
 from __future__ import annotations
@@ -35,7 +41,7 @@ import cv2
 import paho.mqtt.client as mqtt
 
 from edge_vision.cascada import VERSION_METRICAS, VERSION_SEGUIMIENTO, Seguidor, Ventana
-from edge_vision.detector import Detector
+from edge_vision.detector import Detector, captura_jpeg
 
 logger = logging.getLogger("edge_vision")
 
@@ -138,6 +144,9 @@ def main() -> None:
                 estado_calibracion=env.get("EDGE_VISION_ESTADO_CALIBRACION", "CALIBRADO"),
                 version_detector=detector.version,
             )
+            if env.get("EDGE_VISION_CAPTURA", "1") != "0":
+                vistos = [(tr.id, tr.caja) for tr in seguidor.activos if tr.sin_ver == 0]
+                cuerpo["captura"] = captura_jpeg(cuadro, vistos)
             cliente.publish(topic, json.dumps(cuerpo), qos=1)
             logger.info(
                 "Ventana publicada: %s",

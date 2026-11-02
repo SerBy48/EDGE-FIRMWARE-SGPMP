@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                     |
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-11-02 | Arekkazu | V1 RF-53: detector YOLOv8n en ONNX sin el paquete ultralytics    |
+# | 2026-11-02 | Arekkazu | V1 RF-53: captura JPEG con las cajas para ver qué detectó la cámara |
 """Detector de la cascada: el `.onnx` YOLOv8n de M04 (poblacionales V4) con onnxruntime.
 
 Pre y postproceso propios (letterbox, NMS de OpenCV): no se importa `ultralytics`.
@@ -10,6 +11,7 @@ fuera de DEV espera la decisión D-D del líder.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 from pathlib import Path
 
@@ -59,3 +61,27 @@ class Detector:
         )
         quedan = cv2.dnn.NMSBoxes(cajas.tolist(), puntaje.tolist(), self.confianza, self.iou_nms)
         return [tuple(float(v) for v in cajas[i]) for i in np.array(quedan).flatten()]
+
+
+def captura_jpeg(cuadro: np.ndarray, cajas: list[tuple[int, Caja]], ancho_max: int = 640) -> str:
+    """Cuadro con cada animal en su caja y su número, en JPEG base64 de ≤ ancho_max px."""
+    img = cuadro.copy()
+    for id_track, (x, y, w, h) in cajas:
+        esquina = (int(x), int(y))
+        cv2.rectangle(img, esquina, (int(x + w), int(y + h)), (0, 200, 255), 2)
+        cv2.putText(
+            img,
+            str(id_track),
+            (int(x) + 3, int(y) + 18),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 200, 255),
+            2,
+        )
+    if img.shape[1] > ancho_max:
+        r = ancho_max / img.shape[1]
+        img = cv2.resize(img, (ancho_max, round(img.shape[0] * r)))
+    ok, jpeg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    if not ok:
+        raise ValueError("No se pudo codificar la captura en JPEG.")
+    return base64.b64encode(jpeg.tobytes()).decode()
