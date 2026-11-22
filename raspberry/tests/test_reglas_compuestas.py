@@ -618,6 +618,7 @@ def test_mapa_de_variables_desde_el_entorno():
         "EDGE_MQTT_HOST": "h",
         "EDGE_MQTT_USERNAME": "u",
         "EDGE_MQTT_PASSWORD": "p",
+        "EDGE_MQTT_SIN_TLS": "1",
         "EDGE_HEARTBEAT_INTERVAL_S": "60",
         "EDGE_FRECUENCIA_CAPTURA_MIN": "1",
         "EDGE_INTERVALO_TRANSMISION_MIN": "1",

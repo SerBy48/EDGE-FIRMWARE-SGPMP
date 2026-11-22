@@ -13,7 +13,7 @@ el servidor contra la línea base del área (RF-24), no el nodo.
 
 Variables (las de MQTT son las mismas del edge_agent):
   EDGE_MQTT_HOST, EDGE_MQTT_PORT, EDGE_MQTT_USERNAME, EDGE_MQTT_PASSWORD,
-  EDGE_MQTT_CA_CERT, EDGE_TOPIC_PREFIX
+  EDGE_MQTT_CA_CERT (o EDGE_MQTT_SIN_TLS=1 solo en desarrollo), EDGE_TOPIC_PREFIX
   EDGE_VISION_SERIAL        serial de la cámara (dispositivo CAMARA_VISION de M09)
   EDGE_VISION_AREA_ID       área productiva de la cámara (RF-22)
   EDGE_VISION_MODELO        ruta del .onnx (p. ej. porcinos_yolov8n.onnx)
@@ -40,6 +40,7 @@ from datetime import UTC, datetime
 import cv2
 import paho.mqtt.client as mqtt
 
+from edge_agent.config import ConfigError, validar_tls
 from edge_vision.cascada import VERSION_METRICAS, VERSION_SEGUIMIENTO, Seguidor, Ventana
 from edge_vision.detector import Detector, captura_jpeg
 
@@ -81,13 +82,25 @@ def sobre_d4(
 
 
 def _conectar(env: dict) -> mqtt.Client:
+    # Misma regla que el edge_agent (SEG-EDGE-02, #29): sin CA no hay texto plano salvo
+    # EDGE_MQTT_SIN_TLS=1 explícito.
+    ca_cert = env.get("EDGE_MQTT_CA_CERT") or None
+    try:
+        validar_tls(ca_cert, env.get("EDGE_MQTT_SIN_TLS", "0").strip() == "1")
+    except ConfigError as exc:
+        raise SystemExit(f"Configuración inválida: {exc}") from exc
     cliente = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2, client_id=f"vision-{env['EDGE_VISION_SERIAL']}"
     )
     cliente.username_pw_set(env["EDGE_MQTT_USERNAME"], env["EDGE_MQTT_PASSWORD"])
-    if env.get("EDGE_MQTT_CA_CERT"):
-        cliente.tls_set(ca_certs=env["EDGE_MQTT_CA_CERT"])
-    puerto = int(env.get("EDGE_MQTT_PORT") or (8883 if env.get("EDGE_MQTT_CA_CERT") else 1883))
+    if ca_cert:
+        cliente.tls_set(ca_certs=ca_cert)
+    else:
+        logger.warning(
+            "MQTT SIN TLS (EDGE_MQTT_SIN_TLS=1): la credencial viaja en texto plano. "
+            "Solo para desarrollo"
+        )
+    puerto = int(env.get("EDGE_MQTT_PORT") or (8883 if ca_cert else 1883))
     cliente.connect_async(env["EDGE_MQTT_HOST"], puerto)
     cliente.loop_start()  # paho reconecta solo
     return cliente

@@ -2,6 +2,7 @@
 # |------------|----------|----------------------------------------------------------------|
 # | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_FAKE_VARIABLES          |
 # | 2026-11-01 | SerBy48  | RF-23/RF-55: avisos por mapa RF-55 con errata o regla incompleta |
+# | 2026-11-22 | SerBy48  | SEG-EDGE-02: sin CA no se conecta en claro salvo EDGE_MQTT_SIN_TLS |
 import pytest
 
 from edge_agent.config import ConfigError, Settings, avisos_configuracion
@@ -10,6 +11,7 @@ BASE_ENV = {
     "EDGE_MQTT_HOST": "broker.test",
     "EDGE_MQTT_USERNAME": "sgpmp_devices",
     "EDGE_MQTT_PASSWORD": "secreto",
+    "EDGE_MQTT_SIN_TLS": "1",
     "EDGE_SERIALS": "IOT-A, IOT-B",
     "EDGE_HEARTBEAT_INTERVAL_S": "300",
     "EDGE_FRECUENCIA_CAPTURA_MIN": "10",
@@ -35,17 +37,48 @@ def test_parametros_obligatorios_sin_default(missing):
         Settings.from_env(env)
 
 
+CON_TLS_ENV = {k: v for k, v in BASE_ENV.items() if k != "EDGE_MQTT_SIN_TLS"}
+
+
 def test_tls_cambia_puerto_por_defecto(tmp_path):
     ca = tmp_path / "ca.pem"
     ca.write_text("x")
-    s = Settings.from_env({**BASE_ENV, "EDGE_MQTT_CA_CERT": str(ca)})
+    s = Settings.from_env({**CON_TLS_ENV, "EDGE_MQTT_CA_CERT": str(ca)})
     assert s.mqtt_port == 8883
     assert s.mqtt_ca_cert == ca
 
 
 def test_ca_inexistente_falla():
     with pytest.raises(ConfigError, match="CA_CERT"):
-        Settings.from_env({**BASE_ENV, "EDGE_MQTT_CA_CERT": "/no/existe.pem"})
+        Settings.from_env({**CON_TLS_ENV, "EDGE_MQTT_CA_CERT": "/no/existe.pem"})
+
+
+@pytest.mark.parametrize("sin_tls", [None, "0"])
+def test_sin_ca_no_cae_a_texto_plano(sin_tls):
+    # SEG-EDGE-02 (#29): antes conectaba en silencio a 1883 sin cifrar.
+    env = dict(CON_TLS_ENV)
+    if sin_tls is not None:
+        env["EDGE_MQTT_SIN_TLS"] = sin_tls
+    with pytest.raises(ConfigError, match="EDGE_MQTT_CA_CERT.*EDGE_MQTT_SIN_TLS=1"):
+        Settings.from_env(env)
+
+
+def test_sin_tls_explicito_conecta_en_claro():
+    s = Settings.from_env(BASE_ENV)
+    assert s.mqtt_ca_cert is None
+    assert s.mqtt_port == 1883
+
+
+def test_ca_y_sin_tls_a_la_vez_falla(tmp_path):
+    ca = tmp_path / "ca.pem"
+    ca.write_text("x")
+    with pytest.raises(ConfigError, match="a la vez"):
+        Settings.from_env({**BASE_ENV, "EDGE_MQTT_CA_CERT": str(ca)})
+
+
+def test_sin_tls_valor_invalido_falla():
+    with pytest.raises(ConfigError, match="EDGE_MQTT_SIN_TLS"):
+        Settings.from_env({**BASE_ENV, "EDGE_MQTT_SIN_TLS": "si"})
 
 
 def test_password_no_aparece_en_repr():

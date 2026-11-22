@@ -9,6 +9,7 @@ BASE = {
     "EDGE_MQTT_HOST": "broker.test",
     "EDGE_MQTT_USERNAME": "sgpmp_devices",
     "EDGE_MQTT_PASSWORD": "secreto",
+    "EDGE_MQTT_SIN_TLS": "1",
     "EDGE_SERIALS": "IOT-A,IOT-B",
     "EDGE_HEARTBEAT_INTERVAL_S": "300",
     "EDGE_FRECUENCIA_CAPTURA_MIN": "10",

@@ -2,6 +2,7 @@
 # |------------|----------|----------------------------------------------------------------|
 # | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_FAKE/LORA_VARIABLES          |
 # | 2026-11-01 | SerBy48  | RF-23/RF-55: avisos por mapa RF-55 con errata o regla incompleta |
+# | 2026-11-22 | SerBy48  | SEG-EDGE-02: MQTT sin CA falla cerrado (opt-in EDGE_MQTT_SIN_TLS) |
 """Configuración del edge_agent, leída de variables de entorno.
 
 En la Raspberry vienen de `/etc/sgpmp/edge-agent.env` (cargado por systemd con
@@ -133,6 +134,7 @@ class Settings:
         ca_cert = env.get("EDGE_MQTT_CA_CERT") or None
         if ca_cert and not Path(ca_cert).is_file():
             raise ConfigError(f"EDGE_MQTT_CA_CERT no existe: {ca_cert}")
+        validar_tls(ca_cert, _int_in(env, "EDGE_MQTT_SIN_TLS", "0", 0, 1) == 1)
 
         source = env.get("EDGE_SOURCE", "fake")
         if source not in ("fake", "lora"):
@@ -384,6 +386,24 @@ def parse_lora_settings(
         nodos_v2=nodos_v2,
         aceptar_v1=_int_in(env, "EDGE_LORA_ACEPTAR_V1", "1", 0, 1) == 1,
     )
+
+
+def validar_tls(ca_cert: str | None, sin_tls: bool) -> None:
+    """Falla cerrado (SEG-EDGE-02, #29): sin CA no se conecta en claro salvo opt-in explícito.
+
+    Antes, sin EDGE_MQTT_CA_CERT el agente caía en silencio a 1883 en texto plano y mandaba
+    la credencial MQTT sin cifrar. Ahora eso exige EDGE_MQTT_SIN_TLS=1, que es solo para
+    desarrollo (el broker de dev escucha sin TLS) y deja un aviso en el log al arrancar.
+    """
+    if ca_cert and sin_tls:
+        raise ConfigError(
+            "EDGE_MQTT_CA_CERT y EDGE_MQTT_SIN_TLS=1 a la vez: quitar EDGE_MQTT_SIN_TLS"
+        )
+    if not ca_cert and not sin_tls:
+        raise ConfigError(
+            "Falta EDGE_MQTT_CA_CERT: sin él la credencial MQTT viajaría en texto plano. "
+            "Solo en desarrollo, contra un broker sin TLS: EDGE_MQTT_SIN_TLS=1"
+        )
 
 
 def _parse_mapping(raw: str, name: str, separator: str) -> dict[str, str]:
