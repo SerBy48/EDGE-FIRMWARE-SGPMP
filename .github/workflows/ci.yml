@@ -5,6 +5,11 @@ on:
   push:
     branches: [main, develop]
 
+# Mínimo privilegio (SEG-CICD-01, #31): el GITHUB_TOKEN solo lee. El único job
+# que escribe (release) declara sus permisos y además empuja con GH_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   raspberry:
     name: edge_agent (Raspberry)
@@ -55,11 +60,55 @@ jobs:
       - name: Compilación ESP8266
         run: pio run -e nodemcuv2
 
+  # SAST del código Python de la Raspberry (SEG-CICD-01, #31). Los scripts de
+  # shell ya pasan por shellcheck en el job raspberry. Bloquea solo con
+  # severidad HIGH; el reporte completo queda en el log para revisarlo.
+  sast:
+    name: Seguridad (SAST, Bandit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: raspberry
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install "bandit>=1.8,<2"
+      - name: Reporte completo (no bloquea)
+        run: bandit -r edge_agent edge_vision --exit-zero
+      - name: Hallazgos HIGH (bloquea)
+        run: bandit -r edge_agent edge_vision -q --severity-level high --confidence-level medium
+
+  # SCA de las dependencias del edge_agent, con los extras que se instalan en
+  # campo (lora, vision). Se audita lo que resuelve pip, no el rango de
+  # pyproject.toml: lo que llegaría a una Pi instalada hoy.
+  sca:
+    name: Seguridad (SCA, pip-audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: raspberry
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Resolver dependencias
+        run: |
+          python -m venv /tmp/edge-deps
+          /tmp/edge-deps/bin/pip install -q ".[lora,vision]"
+          /tmp/edge-deps/bin/pip freeze --exclude-editable | grep -vi '^sgpmp-edge-agent' > /tmp/requirements.txt
+          cat /tmp/requirements.txt
+      - run: pip install "pip-audit>=2.7,<3"
+      - name: Vulnerabilidades conocidas (bloquea)
+        run: pip-audit -r /tmp/requirements.txt --no-deps --disable-pip --progress-spinner off
+
   # Versionamiento automático (release.config.cjs, docs/RELEASES.md): solo
   # con el CI en verde. Un tag final en main se instala en todas las Pi.
   release:
     name: Versionamiento
-    needs: [raspberry, esp32]
+    needs: [raspberry, esp32, sast, sca]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency: release
