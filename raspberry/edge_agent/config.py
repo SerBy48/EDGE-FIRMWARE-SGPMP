@@ -2,6 +2,8 @@
 # |------------|----------|----------------------------------------------------------------|
 # | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_FAKE/LORA_VARIABLES          |
 # | 2026-11-01 | SerBy48  | RF-23/RF-55: avisos por mapa RF-55 con errata o regla incompleta |
+# | 2026-11-22 | SerBy48  | SEG-EDGE-02: MQTT sin CA falla cerrado (opt-in EDGE_MQTT_SIN_TLS) |
+# | 2026-11-22 | SerBy48  | SEG-EDGE-03: v1 rechazado por defecto sin EDGE_LORA_NODES; aviso |
 """Configuración del edge_agent, leída de variables de entorno.
 
 En la Raspberry vienen de `/etc/sgpmp/edge-agent.env` (cargado por systemd con
@@ -133,6 +135,7 @@ class Settings:
         ca_cert = env.get("EDGE_MQTT_CA_CERT") or None
         if ca_cert and not Path(ca_cert).is_file():
             raise ConfigError(f"EDGE_MQTT_CA_CERT no existe: {ca_cert}")
+        validar_tls(ca_cert, _int_in(env, "EDGE_MQTT_SIN_TLS", "0", 0, 1) == 1)
 
         source = env.get("EDGE_SOURCE", "fake")
         if source not in ("fake", "lora"):
@@ -382,8 +385,29 @@ def parse_lora_settings(
         downlink_delay_ms=_int_in(env, "EDGE_LORA_DOWNLINK_DELAY_MS", "50", 0, 1000),
         secreto_sitio=secreto,
         nodos_v2=nodos_v2,
-        aceptar_v1=_int_in(env, "EDGE_LORA_ACEPTAR_V1", "1", 0, 1) == 1,
+        # SEG-EDGE-03 (#30): v1 no tiene autenticación (solo CRC). Por defecto se acepta
+        # únicamente si hay nodos v1 declarados en EDGE_LORA_NODES (migración en curso); sin
+        # ellos, el default es rechazar toda trama v1.
+        aceptar_v1=_int_in(env, "EDGE_LORA_ACEPTAR_V1", "1" if parsed_nodes else "0", 0, 1) == 1,
     )
+
+
+def validar_tls(ca_cert: str | None, sin_tls: bool) -> None:
+    """Falla cerrado (SEG-EDGE-02, #29): sin CA no se conecta en claro salvo opt-in explícito.
+
+    Antes, sin EDGE_MQTT_CA_CERT el agente caía en silencio a 1883 en texto plano y mandaba
+    la credencial MQTT sin cifrar. Ahora eso exige EDGE_MQTT_SIN_TLS=1, que es solo para
+    desarrollo (el broker de dev escucha sin TLS) y deja un aviso en el log al arrancar.
+    """
+    if ca_cert and sin_tls:
+        raise ConfigError(
+            "EDGE_MQTT_CA_CERT y EDGE_MQTT_SIN_TLS=1 a la vez: quitar EDGE_MQTT_SIN_TLS"
+        )
+    if not ca_cert and not sin_tls:
+        raise ConfigError(
+            "Falta EDGE_MQTT_CA_CERT: sin él la credencial MQTT viajaría en texto plano. "
+            "Solo en desarrollo, contra un broker sin TLS: EDGE_MQTT_SIN_TLS=1"
+        )
 
 
 def _parse_mapping(raw: str, name: str, separator: str) -> dict[str, str]:
@@ -417,6 +441,9 @@ def _parse_int_value(raw: str, name: str, minimo: int, maximo: int) -> int:
 def avisos_configuracion(settings: Settings) -> list[str]:
     """Configuración válida pero que probablemente no hace lo esperado (se loguea al arrancar).
 
+    - Nodos LoRa v1 aceptados (SEG-EDGE-03, #30): sus tramas solo llevan CRC, así que
+      cualquiera en alcance de radio puede falsificar sus lecturas. Riesgo residual de la
+      migración a v2, no un error.
     - Variable sin `sensor`: si el nodo tiene más de un sensor activo en la plataforma, el
       broker rechaza la lectura (ERROR_SENSOR) y el Edge no se entera.
     - Ningún nombre de las reglas compuestas RF-55 coincide con las variables configuradas y
@@ -436,7 +463,15 @@ def avisos_configuracion(settings: Settings) -> list[str]:
     else:
         variables = [(v.nombre, v.nombre, v.sensor) for v in settings.fake_variables]
         origen = "EDGE_FAKE_VARIABLES"
-    avisos = [
+    avisos = []
+    if settings.lora is not None and settings.lora.aceptar_v1 and settings.lora.nodes:
+        seriales = ", ".join(serial for _, serial in sorted(settings.lora.nodes.items()))
+        avisos.append(
+            f"EDGE_LORA_NODES: nodos v1 sin autenticación ({seriales}): sus tramas solo llevan "
+            "CRC y se pueden falsificar desde el alcance de radio. Reflashearlos con v2 "
+            "(lora-key) y dejar EDGE_LORA_ACEPTAR_V1=0 (docs/PROTOCOLO_LORA.md §11)"
+        )
+    avisos += [
         f"{origen}: {etiqueta} sin `sensor`; si el nodo tiene más de un sensor "
         "activo en la plataforma, el broker rechaza la lectura (ERROR_SENSOR)"
         for etiqueta, _, sensor in variables

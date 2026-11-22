@@ -108,6 +108,12 @@ class MqttLink:
             keepalive=self._settings.mqtt_keepalive_s,
         )
         self._client.loop_start()
+        if not self._settings.mqtt_ca_cert:
+            # Solo llega aquí con EDGE_MQTT_SIN_TLS=1 (config.validar_tls).
+            logger.warning(
+                "MQTT SIN TLS (EDGE_MQTT_SIN_TLS=1): usuario y contraseña viajan en texto "
+                "plano. Solo para desarrollo; en test/producción configurar EDGE_MQTT_CA_CERT"
+            )
 
     def stop(self) -> None:
         if self.connected:

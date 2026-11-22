@@ -36,7 +36,8 @@ cuando el repo sea privado. Los tags los crea el CI a partir de los commits
 ## Qué hace
 
 - Conexión persistente (`clean_session=False`, `client_id` fijo, QoS 1,
-  reconexión automática con backoff), con TLS opcional.
+  reconexión automática con backoff), con TLS obligatorio salvo opt-in de
+  desarrollo (ver [TLS de MQTT por ambiente](#tls-de-mqtt-por-ambiente)).
 - Heartbeat cada `min(EDGE_HEARTBEAT_INTERVAL_S, frecuencia_captura/2)`,
   con `estado_local_buffer`, `datos_pendientes_buffer`, `version_firmware` y
   `reloj_sincronizado`.
@@ -51,6 +52,23 @@ cuando el repo sea privado. Los tags los crea el CI a partir de los commits
   `python -m edge_agent.inspeccionar buffer|historial` (ver
   `docs/CONTRATO_EVENTO_EDGE.md` §7).
 
+## TLS de MQTT por ambiente
+
+El agente no cae en silencio a texto plano (SEG-EDGE-02, #29): sin
+`EDGE_MQTT_CA_CERT` rechaza arrancar, también en `--check-config`.
+
+| Ambiente | Configuración | Comportamiento |
+|---|---|---|
+| test / producción | `EDGE_MQTT_CA_CERT=/etc/sgpmp/ca.pem` | TLS, puerto por defecto 8883 |
+| desarrollo (broker sin TLS) | `EDGE_MQTT_SIN_TLS=1`, sin CA | texto plano, puerto por defecto 1883, `WARNING` en el log al arrancar |
+| cualquiera | sin CA y sin `EDGE_MQTT_SIN_TLS=1` | no arranca (`ConfigError`) |
+| cualquiera | CA y `EDGE_MQTT_SIN_TLS=1` a la vez | no arranca (`ConfigError`) |
+
+Equipos ya instalados que hoy conectan sin TLS: al actualizar, `install.sh`
+les agrega `EDGE_MQTT_SIN_TLS=1` (con un aviso en el log) para no dejarlos sin
+servicio. Hay que reemplazarlo por `EDGE_MQTT_CA_CERT` antes de test o
+producción. Una instalación nueva con `--env` no se migra.
+
 ## Correr en desarrollo
 
 ```bash
@@ -63,7 +81,8 @@ python -m venv .venv
 .venv/Scripts/python scripts/inyectar_lecturas.py scripts/casos_rf55.json
 .venv/Scripts/python scripts/medir_rendimiento.py todo    # latencia y ráfaga
 
-# Aceptación contra dev (además de EDGE_*: EDGE_IT_API_URL, EDGE_IT_API_TOKEN)
+# Aceptación contra dev (además de EDGE_*: EDGE_IT_API_URL, EDGE_IT_API_TOKEN;
+# el broker de dev no tiene TLS: EDGE_MQTT_SIN_TLS=1)
 .venv/Scripts/python -m pytest -m integration -v
 
 # Contra un broker (variables en edge-agent.env.example)

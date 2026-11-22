@@ -136,6 +136,17 @@ fi
 if [[ -n "$ca_src" ]]; then
   install -m 0644 -o root -g root "$ca_src" "$CONF_DIR/ca.pem"
 fi
+# SEG-EDGE-02 (#29): sin EDGE_MQTT_CA_CERT el agente ya no arranca en texto
+# plano salvo EDGE_MQTT_SIN_TLS=1. Un equipo ya instalado que hoy conecta sin
+# TLS (llega aquí por update.sh, sin --env) recibe el opt-in de forma
+# explícita y ruidosa en vez de quedar sin servicio. Una instalación nueva
+# (--env) no se migra: sin CA ni opt-in, --check-config la rechaza.
+if [[ -z "$env_src" ]] && ! grep -q '^EDGE_MQTT_CA_CERT=.' "$ENV_FILE" \
+  && ! grep -q '^EDGE_MQTT_SIN_TLS=' "$ENV_FILE"; then
+  printf '\n# Agregado por install.sh al migrar (SEG-EDGE-02): este equipo conectaba sin\n# TLS. Configurar EDGE_MQTT_CA_CERT y quitar esta línea antes de test/producción.\nEDGE_MQTT_SIN_TLS=1\n' \
+    >>"$ENV_FILE"
+  log "AVISO: $ENV_FILE sin EDGE_MQTT_CA_CERT; se agregó EDGE_MQTT_SIN_TLS=1 (MQTT en texto plano)"
+fi
 
 log "Validando configuración"
 # systemd-run usa el mismo parser de EnvironmentFile que el servicio (no
