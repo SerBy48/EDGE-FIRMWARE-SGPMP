@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                    |
 # |------------|----------|----------------------------------------------------------------|
 # | 2026-11-01 | Arekkazu | RF-23/RF-22: `sensor` opcional en EDGE_LORA_VARIABLES          |
+# | 2026-11-22 | SerBy48  | SEG-EDGE-03: v1 rechazado por defecto sin nodos v1; aviso      |
 import pytest
 
 from edge_agent.config import ConfigError, Settings, avisos_configuracion
@@ -86,7 +87,8 @@ def test_config_v2_deriva_los_nodos_de_edge_serials():
     assert lora.secreto_sitio == bytes(32)
     # El propio Edge no es un nodo de radio.
     assert lora.nodos_v2 == {keys.node_id_de("IOT-A"): "IOT-A", keys.node_id_de("IOT-B"): "IOT-B"}
-    assert lora.aceptar_v1
+    # SEG-EDGE-03 (#30): sin nodos v1 declarados, v1 (solo CRC) se rechaza por defecto.
+    assert not lora.aceptar_v1
     assert "00" * 32 not in repr(lora)  # el secreto nunca va a un log
 
 
@@ -94,6 +96,20 @@ def test_config_v1_y_v2_conviven_durante_la_migracion():
     lora = Settings.from_env({**BASE, "EDGE_LORA_SECRETO_SITIO": SECRETO}).lora
     assert lora.nodes == {1: "IOT-A", 2: "IOT-B"}
     assert set(lora.nodos_v2.values()) == {"IOT-A", "IOT-B"}
+
+
+def test_config_v1_se_acepta_por_defecto_solo_con_nodos_v1():
+    assert Settings.from_env({**BASE, "EDGE_LORA_SECRETO_SITIO": SECRETO}).lora.aceptar_v1
+    env = {**BASE, "EDGE_LORA_SECRETO_SITIO": SECRETO, "EDGE_LORA_ACEPTAR_V1": "1"}
+    env.pop("EDGE_LORA_NODES")
+    assert Settings.from_env(env).lora.aceptar_v1  # explícito: se respeta
+
+
+def test_aviso_de_nodos_v1_sin_autenticacion():
+    avisos = avisos_configuracion(Settings.from_env({**BASE, "EDGE_LORA_SECRETO_SITIO": SECRETO}))
+    assert any("nodos v1 sin autenticación (IOT-A, IOT-B)" in a for a in avisos)
+    env = {**BASE, "EDGE_LORA_SECRETO_SITIO": SECRETO, "EDGE_LORA_ACEPTAR_V1": "0"}
+    assert not any("v1" in a for a in avisos_configuracion(Settings.from_env(env)))
 
 
 def test_config_v1_desactivado():
@@ -125,6 +141,7 @@ def test_avisos_de_arranque_lora():
     # BASE usa los nombres por defecto de RF-55 (temperatura_ambiente): solo falta `sensor`.
     avisos = avisos_configuracion(Settings.from_env(BASE))
     assert [a.split(" (")[0] for a in avisos] == [
+        "EDGE_LORA_NODES: nodos v1 sin autenticación",
         "EDGE_LORA_VARIABLES: code 1",
         "EDGE_LORA_VARIABLES: code 2",
     ]

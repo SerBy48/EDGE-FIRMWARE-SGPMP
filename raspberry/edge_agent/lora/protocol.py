@@ -1,12 +1,20 @@
-"""Codificación de tramas LoRa v1 — especificación en docs/PROTOCOLO_LORA.md.
+"""Codificación de tramas LoRa v1 y v2 — especificación en docs/PROTOCOLO_LORA.md.
 
 La misma codificación está en C++ en esp32/lib/sgpmp_protocol; ambos lados
-se prueban contra los mismos vectores (sección 9 del documento). Cualquier
-cambio acá debe replicarse allá. Un cambio incompatible sube
+se prueban contra los mismos vectores (secciones 9 y 11.6 del documento).
+Cualquier cambio acá debe replicarse allá. Un cambio incompatible sube
 PROTOCOL_VERSION; un campo opcional al final de un payload (como los
 sensores del ESTADO) no.
 
-Trama: ver(1) net_id(1) node_id(2) msg_type(1) seq(1) payload(N) crc16(2)
+v2 (§11, la que usan los nodos nuevos): AES-128-CCM con clave por nodo
+(HKDF del secreto del sitio), MIC de 4 B y fcnt contra repeticiones.
+  ver=2(1) net_id(1) node_id(2) msg_type(1) fcnt(4) payload cifrado(0–38) mic(4)
+
+v1 (solo migración): el CRC16 detecta errores de radio pero NO autentica:
+cualquiera en alcance puede fabricar una trama válida (SEG-EDGE-03, #30).
+La Raspberry la acepta solo de nodos en EDGE_LORA_NODES que aún no hablaron
+v2, y nunca con EDGE_LORA_ACEPTAR_V1=0.
+  ver(1) net_id(1) node_id(2) msg_type(1) seq(1) payload(N) crc16(2)
 Todos los enteros en big-endian; floats IEEE-754 de 32 bits big-endian.
 """
 
